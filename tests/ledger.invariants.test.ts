@@ -1,12 +1,13 @@
 import { describe, it, expect } from "vitest";
 import { Money, GBP, USD, sumMoney } from "../src/money/index.js";
-import { JournalEntry, UnbalancedEntryError, Ledger, trialBalance, equationResidual } from "../src/ledger/index.js";
+import { JournalEntry, UnbalancedEntryError, Ledger } from "../src/ledger/index.js";
 
 let seed = 0x51ed7ee;
 const rnd = () => ((seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff);
 const randInt = (lo: number, hi: number) => lo + Math.floor(rnd() * (hi - lo + 1));
 
-const ACCTS = ["1000", "1100", "2000", "3000", "4000", "5000"];
+const ACCTS = ["1000", "1100", "2000", "3000", "4000", "5000"] as const;
+const acct = () => ACCTS[randInt(0, ACCTS.length - 1)] as string;
 
 describe("no sequence of operations can unbalance the ledger", () => {
   it("rejects every randomly-unbalanced entry (5k attempts)", () => {
@@ -22,7 +23,7 @@ describe("no sequence of operations can unbalance the ledger", () => {
       expect(() =>
         JournalEntry.create({
           id: `e${i}`, date: "2026-01-15", narration: "adversarial",
-          postings: amounts.map((a) => ({ account: ACCTS[randInt(0, 5)], amount: Money.ofMinor(a, GBP) })),
+          postings: amounts.map((a) => ({ account: acct(), amount: Money.ofMinor(a, GBP) })),
         }),
       ).toThrow(UnbalancedEntryError);
       rejected++;
@@ -40,14 +41,14 @@ describe("no sequence of operations can unbalance the ledger", () => {
       if (amounts.some((a) => a === 0n)) continue;
       const e = JournalEntry.create({
         id: `ok${i}`, date: "2026-01-15", narration: "balanced",
-        postings: amounts.map((a) => ({ account: ACCTS[randInt(0, 5)], amount: Money.ofMinor(a, GBP) })),
+        postings: amounts.map((a) => ({ account: acct(), amount: Money.ofMinor(a, GBP) })),
       });
       ledger = ledger.post(e);
       // after EVERY post, all postings in the ledger must still sum to zero
-      const all = ledger.entries.flatMap((x) => x.postings.map((p) => p.amount));
+      const all = ledger.all().flatMap((x) => x.postings.map((p) => p.amount));
       if (all.length) expect(sumMoney(all, GBP).minorUnits).toBe(0n);
     }
-    expect(ledger.entries.length).toBeGreaterThan(1500);
+    expect(ledger.size).toBeGreaterThan(1500);
   });
 
   it("mixed-currency entries must balance per currency, not in aggregate", () => {

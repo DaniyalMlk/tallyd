@@ -9,7 +9,7 @@ const randInt = (lo: number, hi: number) => lo + Math.floor(rnd() * (hi - lo + 1
 describe("allocation conserves every minor unit", () => {
   it("split(n) never creates or destroys value, across 20k random cases", () => {
     for (let i = 0; i < 20000; i++) {
-      const cur = [GBP, JPY, KWD][randInt(0, 2)];
+      const cur = [GBP, JPY, KWD][randInt(0, 2)]!;
       const amount = BigInt(randInt(-5_000_000, 5_000_000));
       const parts = randInt(1, 40);
       const m = Money.ofMinor(amount, cur);
