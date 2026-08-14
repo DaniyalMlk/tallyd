@@ -9,7 +9,8 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "demo": "vite-node src/demo/main.ts"
+    "demo": "vite-node src/demo/main.ts",
+    "demo:ingest": "vite-node src/demo/mainIngest.ts"
   },
   "devDependencies": {
     "@types/node": "^22.10.2",
