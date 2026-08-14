@@ -1,0 +1,19 @@
+{
+  "name": "tallyd",
+  "version": "0.1.0",
+  "description": "Double-entry ledger and bank-reconciliation engine",
+  "type": "module",
+  "license": "MIT",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "fast-check": "^3.23.2",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  }
+}
