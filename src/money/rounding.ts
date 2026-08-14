@@ -118,7 +118,13 @@ export function decimalToRational(input: string): { numerator: bigint; denominat
   let denominator = 10n ** BigInt(fraction.length);
 
   if (exponent !== undefined) {
-    const e = BigInt(exponent);
+    let e = BigInt(exponent);
+    // Cancel against the fractional denominator before growing the numerator,
+    // so "2.5e2" comes back as 250/1 rather than 2500/10.
+    while (e > 0n && denominator % 10n === 0n && denominator > 1n) {
+      denominator /= 10n;
+      e -= 1n;
+    }
     if (e > 0n) numerator *= 10n ** e;
     else if (e < 0n) denominator *= 10n ** -e;
   }
