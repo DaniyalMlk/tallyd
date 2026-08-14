@@ -148,6 +148,12 @@ export function canParseIn(input: string, format: DateFormat): boolean {
   return components !== null && isRealDate(components);
 }
 
+/**
+ * Share of a column a format must read to be considered at all. Below this it
+ * is the wrong format rather than the right one with bad rows in it.
+ */
+const MINIMUM_COVERAGE = 0.8;
+
 export interface DateFormatDetection {
   readonly format: DateFormat;
   /** Every format that parses all the samples. More than one means ambiguity. */
@@ -179,9 +185,19 @@ export function detectDateFormat(
     };
   }
 
-  const candidates = DATE_FORMATS.filter((format) =>
-    usable.every((sample) => canParseIn(sample, format)),
-  );
+  // A format need not read *every* sample: one impossible value like 31/02
+  // should not disqualify the format the other four hundred rows are in. But
+  // it must read a strong majority, or it is simply the wrong format.
+  const coverage = DATE_FORMATS.map((format) => ({
+    format,
+    read: usable.filter((sample) => canParseIn(sample, format)).length,
+  }));
+  const best = Math.max(...coverage.map((c) => c.read));
+  const threshold = Math.max(1, Math.ceil(usable.length * MINIMUM_COVERAGE));
+  const candidates =
+    best >= threshold
+      ? coverage.filter((c) => c.read === best).map((c) => c.format)
+      : [];
 
   if (candidates.length === 0) {
     return {
@@ -192,11 +208,13 @@ export function detectDateFormat(
     };
   }
 
+  const unreadable = usable.filter((s) => !candidates.some((f) => canParseIn(s, f)));
+
   // Prefer the caller's format when it is still viable — this is how a user
   // resolves an ambiguous column.
   const preferred = options.prefer;
   if (preferred !== undefined && candidates.includes(preferred)) {
-    return { format: preferred, candidates, confident: true, unparsed: [] };
+    return { format: preferred, candidates, confident: true, unparsed: unreadable };
   }
 
   // Day-first and month-first both surviving means the data cannot tell them
@@ -209,7 +227,7 @@ export function detectDateFormat(
     format: candidates[0] as DateFormat,
     candidates,
     confident: !ambiguous,
-    unparsed: [],
+    unparsed: unreadable,
   };
 }
 

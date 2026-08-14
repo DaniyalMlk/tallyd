@@ -107,6 +107,26 @@ describe("format detection", () => {
     expect(detection.unparsed).toEqual([]);
   });
 
+  it("is not derailed by one impossible value in an otherwise clean column", () => {
+    // 31/02 exists in no format. It must not disqualify DD/MM for the rest of
+    // the column — otherwise one typo silently reinterprets every other row.
+    const detection = detectDateFormat([
+      "25/12/2026",
+      "31/02/2026",
+      "01/08/2026",
+      "14/08/2026",
+      "03/08/2026",
+    ]);
+    expect(detection.format).toBe("DD/MM/YYYY");
+    expect(detection.confident).toBe(true);
+    expect(detection.unparsed).toEqual(["31/02/2026"]);
+  });
+
+  it("still rejects a format that reads only half the column", () => {
+    const detection = detectDateFormat(["13/01/2026", "01/13/2026"]);
+    expect(detection.candidates).toEqual([]);
+  });
+
   it("reports values no format can read", () => {
     const detection = detectDateFormat(["2026-01-02", "PENDING"]);
     expect(detection.candidates).toEqual([]);
