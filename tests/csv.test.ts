@@ -103,8 +103,10 @@ describe("tokenizer", () => {
     fc.assert(
       fc.property(fc.array(fieldArb, { minLength: 1, maxLength: 6 }), (fields) => {
         const encoded = fields.map((f) => `"${f.replace(/"/g, '""')}"`).join(",");
-        expect(parseCsv(encoded)).toEqual([fields.length === 1 && fields[0] === "" ? [] : fields]
-          .filter((r) => r.length > 0));
+        const parsed = parseCsv(encoded);
+        // A row whose every field is empty is dropped, per the rule above; any
+        // other row must come back exactly as it went in.
+        expect(parsed).toEqual(fields.every((f) => f === "") ? [] : [fields]);
       }),
       { numRuns: 200 },
     );
