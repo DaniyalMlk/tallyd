@@ -10,9 +10,9 @@ three invoices. That matching problem is what this project is actually about.
 
 ## Status
 
-Days 1–2 of 7 are done — see [`PLAN.md`](./PLAN.md). The accounting core is
-complete and tested: money, the chart of accounts, journal entries, the ledger and
-the trial balance. Statement ingestion and the matching engine come next.
+The accounting core is complete and tested — money, the chart of accounts, journal
+entries, the ledger and the trial balance. Statement ingestion and the matching
+engine come next; see [`ROADMAP.md`](./ROADMAP.md).
 
 ## Running it
 
