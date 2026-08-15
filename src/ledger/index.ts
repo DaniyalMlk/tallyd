@@ -48,3 +48,16 @@ export {
   equationResidual,
   renderTrialBalance,
 } from "./trialBalance.js";
+
+export {
+  type LedgerDocument,
+  type EntryDocument,
+  type PostingDocument,
+  type AccountDocument,
+  LedgerDocumentError,
+  entryToDocument,
+  ledgerToDocument,
+  ledgerToJson,
+  ledgerFromDocument,
+  ledgerFromJson,
+} from "./serialise.js";
