@@ -11,7 +11,8 @@
     "test:watch": "vitest",
     "demo": "vite-node src/demo/main.ts",
     "demo:ingest": "vite-node src/demo/mainIngest.ts",
-    "demo:reconcile": "vite-node src/demo/mainReconcile.ts"
+    "demo:reconcile": "vite-node src/demo/mainReconcile.ts",
+    "demo:reports": "vite-node src/demo/mainStatements.ts"
   },
   "devDependencies": {
     "@types/node": "^22.10.2",
