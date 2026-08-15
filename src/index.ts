@@ -4,3 +4,4 @@ export * from "./ledger/index.js";
 export * from "./statement/index.js";
 export * from "./reconcile/index.js";
 export * from "./reports/index.js";
+export * from "./cli/index.js";
