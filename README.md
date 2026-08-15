@@ -10,20 +10,23 @@ three invoices. That matching problem is what this project is actually about.
 
 ## Status
 
-Days 1–3 of 7 are done; see [`ROADMAP.md`](./ROADMAP.md). The accounting core is
+Phases 1–4 of 7 are done; see [`ROADMAP.md`](./ROADMAP.md). The accounting core is
 complete and tested — money, the chart of accounts, journal entries, the ledger
 and the trial balance — and so is statement ingestion: CSV and OFX readers,
-format detection and duplicate flagging. The matching engine is next, and it is
-the point of the whole thing.
+format detection and duplicate flagging. The matching engine now works end to
+end, including one-to-many and many-to-one matches, and produces a bank
+reconciliation statement that balances to the penny. Reports, a CLI and a
+dashboard are still to come.
 
 ## Running it
 
 ```bash
 npm install
-npm test           # 478 tests
+npm test              # 636 tests
 npm run typecheck
-npm run demo       # a worked month, posted and reported
-npm run demo:ingest # the same month as the bank recorded it
+npm run demo          # a worked month, posted and reported
+npm run demo:ingest   # the same month as the bank recorded it
+npm run demo:reconcile # the two, matched against each other
 ```
 
 `npm run demo` posts a month of transactions for a small consultancy and prints the
@@ -73,6 +76,40 @@ Descriptions as the matcher will see them
   FPI ACME LTD — INV1001              →  ACME LTD INV1001
 ```
 
+`npm run demo:reconcile` is the one that matters. It runs the matcher over both,
+prints what it decided and why, and finishes with the reconciliation statement:
+
+```
+Matched
+  1:1  exact  0.970      7200.00
+       bank    2026-08-12  FPI ACME LTD INV1001
+       ledger  2026-08-12  Invoice 1001 settled
+         · amount: exact at 7200.00
+         · date: same day
+         · reference: reference 1001
+  1:N  high   0.883      5160.00
+       bank    2026-09-20  FPI NORTHWIND LTD INV1042
+       ledger  2026-09-20  Northwind Ltd — INV1042
+       ledger  2026-09-20  Northwind Ltd — INV1043
+       ledger  2026-09-20  Northwind Ltd — INV1044
+
+Review queue
+  1:1  medium 0.709      -142.50
+       bank    2026-08-15  CARD PAYMENT TO BISTRO ON 14-AUG
+       ledger  2026-08-15  Client dinner — recoded
+
+Bank reconciliation (GBP)
+Balance per bank statement                        20764.20
+  Add: receipts not yet on the statement
+    2026-08-15  Reverse JE-008 — miscoded to Tra      142.50
+  Less: payments not yet on the statement
+    2026-08-14  Client dinner                        -142.50
+    2026-08-15  Client dinner — recoded              -142.50
+Adjusted bank balance                             20621.70
+...
+Reconciled                                            0.00
+```
+
 ## Using it as a library
 
 ```ts
@@ -91,6 +128,23 @@ const ledger = Ledger.empty(chart).post(
 );
 
 trialBalance(ledger).balanced; // true
+```
+
+Reconciling a statement takes three calls:
+
+```ts
+import { bankView, reconcile, reconciliationBridge, renderReconciliationBridge } from "tallyd";
+
+const books = bankView(ledger, "1110");
+const result = reconcile(books, importedStatementLines);
+
+result.matched;             // safe to post
+result.suggested;           // needs a human, best first
+result.unmatchedStatement;  // charges and interest nobody booked
+
+const bridge = reconciliationBridge(result, { bankClosingBalance, bookClosingBalance });
+bridge.reconciled;          // true, or the matcher lost a line
+console.log(renderReconciliationBridge(bridge));
 ```
 
 ## Design notes
@@ -134,6 +188,43 @@ quietly dropped.
 1 March in London would sort before a ledger entry dated 1 March in New York. So
 dates are validated `YYYY-MM-DD` strings with integer day arithmetic, which also
 means lexicographic sort is chronological sort.
+
+**Matching is two passes, and the order is the whole design.** Groups go first.
+A batch supplier payment leaves the bank as one debit and sits in the books as
+four invoices; if the one-to-one pass ran first it would pair that bank line
+with whichever single invoice looked closest, consume both, and strand the other
+three — and the mistake is unrecoverable, because the evidence has been spent.
+Only once the groups are settled do the remaining lines go through
+maximum-weight bipartite matching, so that two statement lines competing for the
+same ledger entry are decided by what is best overall rather than by which
+happened to be scored first. Greedy matching is kept in the codebase purely to
+show the gap: on one small matrix it scores 1.05 where optimal scores 1.80.
+
+Group candidates come from a bounded subset-sum search, and the bound that
+matters most is not the node budget — it is the rule that a group is only
+proposed when no single line already explains the anchor on its own. Without it,
+a £7,200 receipt gets "explained" as an invoice plus a reversal pair that
+happens to cancel out. That is arithmetic, not evidence.
+
+**Every match carries its reasons.** Amount and direction are gates rather than
+contributions: a payment that differs by £40 is not a weak match, it is a
+different transaction. What remains — amount, date proximity, description
+similarity, shared references — is weighted and averaged, and each rule reports
+its own sub-score and what it contributed. The reference rule drops out of the
+average entirely when neither side carries one, because scoring a missing signal
+as zero would punish every cash transaction for something it could never have
+had. Descriptions are compared after normalisation, which is what lets
+`DD RENT, AUGUST 08` and `August rent` agree, and a reference both sides share
+(`INV1001` against a bare `1001`) is treated as near-decisive.
+
+**The reconciliation statement is the real test.** Matching produces two piles of
+leftovers; the bridge walks from the bank's closing balance to the ledger's, one
+reconciling item at a time, and the two adjusted balances must be equal. That is
+not a convention — every match pairs equal amounts, so the whole difference
+between the two closing balances has to live in the unmatched items. A matcher
+that pairs the wrong things still balances; a matcher that loses or double-counts
+a line cannot. The property test throws 400 random books-and-statement pairs at
+it and asserts the difference is exactly zero every time.
 
 ## Licence
 
