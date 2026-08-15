@@ -38,3 +38,36 @@ export {
   maximumWeightMatching,
   greedyMatching,
 } from "./assignment.js";
+
+export {
+  type RuleName,
+  type MatchReason,
+  type Confidence,
+  type ScoredMatch,
+  type ScoringWeights,
+  type ScoringOptions,
+  type ResolvedScoringOptions,
+  DEFAULT_WEIGHTS,
+  resolveScoringOptions,
+  scorePair,
+  scoreGroup,
+} from "./scoring.js";
+
+export {
+  type MatchKind,
+  type Match,
+  type ReconciliationOptions,
+  type ReconciliationResult,
+  type ReconciliationStats,
+  reconcile,
+  describeMatch,
+  significantReasons,
+} from "./matcher.js";
+
+export {
+  type BridgeInput,
+  type ReconciliationBridge,
+  reconciliationBridge,
+  statementClosingBalance,
+  renderReconciliationBridge,
+} from "./bridge.js";
