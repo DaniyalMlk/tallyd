@@ -23,9 +23,10 @@ all disagree slightly.
       immutable append-only ledger, running balances, trial balance.
 - [x] **3 — Statement ingestion.** CSV and OFX-lite parsers, column inference,
       date-format detection, currency normalisation, duplicate detection on import.
-- [ ] **4 — Reconciliation matching.** Exact match, amount-and-date window match,
+- [x] **4 — Reconciliation matching.** Exact match, amount-and-date window match,
       fuzzy description scoring, one-to-many splits and many-to-one aggregations.
-      Confidence scoring with per-rule explanations.
+      Confidence scoring with per-rule explanations, optimal conflict resolution,
+      and a bank reconciliation statement that bridges bank to ledger.
 - [ ] **5 — Reports and CLI.** Trial balance, P&L, balance sheet, ageing. A CLI
       that ingests a statement, reconciles it, and prints the review queue.
 - [ ] **6 — Dashboard.** Ledger explorer and reconciliation review UI, with charts
@@ -53,14 +54,28 @@ all disagree slightly.
 | `src/statement/ofx.ts` | OFX-lite reader |
 | `src/statement/duplicates.ts` | Duplicate detection on import |
 | `src/statement/import.ts` | Import pipeline tying the readers together |
+| `src/reconcile/bankView.ts` | The ledger projected into bank-direction movements |
+| `src/reconcile/similarity.ts` | Levenshtein, Jaro-Winkler, weighted token overlap, references |
+| `src/reconcile/subsetSum.ts` | Bounded subset-sum search for grouped matches |
+| `src/reconcile/assignment.ts` | Maximum-weight bipartite matching (Hungarian) |
+| `src/reconcile/scoring.ts` | Gates, weighted rules and per-rule explanations |
+| `src/reconcile/matcher.ts` | Group pass, optimal pair pass, review queue |
+| `src/reconcile/bridge.ts` | Bank reconciliation statement |
 | `src/demo/month.ts` | A worked month for a small consultancy |
 | `src/demo/statement.ts` | The bank's view of that same month |
+| `src/demo/supplierRun.ts` | A batch payment and a lump-sum receipt |
+| `src/demo/reconcile.ts` | The two matched against each other |
 
-478 tests across 16 files, typecheck clean.
+636 tests across 24 files, typecheck clean.
 
 ## Known gaps
 
 - CI is not wired up. The intended pipeline is `npm run typecheck`, `npm test`,
-  `npm run demo`, `npm run demo:ingest`.
-- Phase 4 needs the matcher itself: the ingestion side produces normalised
-  statement lines, but nothing yet pairs them against ledger entries.
+  `npm run demo`, `npm run demo:ingest`, `npm run demo:reconcile`.
+- Matching has no memory. A pair a reviewer confirms today teaches it nothing
+  about the same counterparty next month, and it should — a confirmed match is
+  the cheapest training signal available.
+- Group matching is capped at four lines a side and never mixes directions, so a
+  batch that is itself paid in two instalments is out of reach.
+- The matcher holds both sides in memory and scores every surviving pair. Fine
+  for a month; the performance pass in phase 7 is where a year gets addressed.
