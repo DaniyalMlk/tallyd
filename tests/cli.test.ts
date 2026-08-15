@@ -42,13 +42,23 @@ const FILES: Record<string, string> = {
   "broken.json": "{ not json",
 };
 
+const WRITTEN: Record<string, string> = {};
+
 const environment: CliEnvironment = {
   readFile: (path: string) => {
     const contents = FILES[path];
     if (contents === undefined) throw new Error(`ENOENT: no such file or directory, open '${path}'`);
     return contents;
   },
+  writeFile: (path: string, contents: string) => {
+    WRITTEN[path] = contents;
+  },
   today: () => date("2026-09-30"),
+};
+
+const readOnly: CliEnvironment = {
+  readFile: environment.readFile,
+  today: environment.today,
 };
 
 const cli = (...argv: string[]) => run(argv, environment);
@@ -315,6 +325,48 @@ describe("accounts", () => {
       code: string;
     }[];
     expect(parsed.some((account) => account.code === "1110")).toBe(true);
+  });
+});
+
+describe("dashboard", () => {
+  it("writes a self-contained page and says what it did", () => {
+    const result = cli("dashboard", "-l", "month.json", "-s", "bank.csv", "-o", "dash.html");
+    expect(result.code).toBe(0);
+    expect(result.stdout).toContain("Wrote dash.html");
+    expect(result.stdout).toContain("7 matched, 2 to review");
+
+    const html = WRITTEN["dash.html"] as string;
+    expect(html.startsWith("<!doctype html>")).toBe(true);
+    expect(html).not.toMatch(/https?:\/\//);
+    expect(html).toContain("window.__TALLYD__");
+    expect(html.length).toBeGreaterThan(20_000);
+  });
+
+  it("requires somewhere to put it", () => {
+    const result = cli("dashboard", "-l", "month.json", "-s", "bank.csv");
+    expect(result.code).toBe(1);
+    expect(result.stderr).toContain("--out is required");
+  });
+
+  it("says so when the environment cannot write", () => {
+    const result = run(
+      ["dashboard", "-l", "month.json", "-s", "bank.csv", "-o", "dash.html"],
+      readOnly,
+    );
+    expect(result.code).toBe(1);
+    expect(result.stderr).toContain("cannot write files");
+  });
+
+  it("exits 2 when the page it wrote will not balance", () => {
+    const result = cli("dashboard", "-l", "month.json", "-s", "wrong-balance.csv", "-o", "bad.html");
+    expect(result.code).toBe(2);
+    expect(result.stderr).toContain("does not balance");
+    expect(WRITTEN["bad.html"]).toBeDefined();
+  });
+
+  it("appears in the usage and has its own help", () => {
+    expect(cli("--help").stdout).toContain("dashboard");
+    expect(cli("dashboard", "--help").stdout).toContain("--out <file>");
   });
 });
 
