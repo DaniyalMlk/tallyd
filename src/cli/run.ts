@@ -31,6 +31,8 @@ import {
   renderReconciliationBridge,
   statementClosingBalance,
 } from "../reconcile/bridge.js";
+import { dashboardData } from "../dashboard/model.js";
+import { renderDashboard } from "../dashboard/render.js";
 import {
   ArgumentError,
   booleanFlag,
@@ -46,6 +48,12 @@ export interface CliEnvironment {
   readonly readFile: (path: string) => string;
   /** Today, for commands that default their as-at date. */
   readonly today: () => CalendarDate;
+  /**
+   * Write a file, for the commands that produce an artefact. Absent in
+   * read-only environments, in which case those commands say so rather than
+   * failing halfway through.
+   */
+  readonly writeFile?: (path: string, contents: string) => void;
 }
 
 export interface CliResult {
@@ -101,6 +109,18 @@ const COMMANDS: Record<string, { describe: string; flags: FlagSpecs }> = {
   accounts: {
     describe: "Render the chart of accounts",
     flags: { ...COMMON },
+  },
+  dashboard: {
+    describe: "Write a self-contained HTML reconciliation dashboard",
+    flags: {
+      ledger: { kind: "string", short: "l", describe: "Ledger document (JSON)", placeholder: "file" },
+      statement: { kind: "string", short: "s", describe: "Bank statement (CSV or OFX)", placeholder: "file" },
+      account: { kind: "string", short: "a", describe: "Bank account code", placeholder: "code" },
+      out: { kind: "string", short: "o", describe: "Where to write the HTML", placeholder: "file" },
+      currency: { kind: "string", describe: "Statement currency (default: the chart's)", placeholder: "code" },
+      "date-window": { kind: "string", describe: "Days either side a pair may differ", placeholder: "days" },
+      "no-groups": { kind: "boolean", describe: "Disable one-to-many matching" },
+    },
   },
 };
 
@@ -451,12 +471,73 @@ function accountsCommand(environment: CliEnvironment, argv: readonly string[]): 
   return { stdout: ledger.chart.render(), stderr: "", code: 0 };
 }
 
+function dashboardCommand(environment: CliEnvironment, argv: readonly string[]): CliResult {
+  const parsed = parseArgs(argv, (COMMANDS["dashboard"] as { flags: FlagSpecs }).flags);
+  const out = requiredFlag(parsed, "out");
+  if (environment.writeFile === undefined) {
+    throw new ArgumentError("This environment cannot write files");
+  }
+
+  const ledger = loadLedger(environment, requiredFlag(parsed, "ledger"));
+  const account = bankAccountFor(ledger, stringFlag(parsed, "account"));
+  const raw = environment.readFile(requiredFlag(parsed, "statement"));
+
+  const currencyCode =
+    stringFlag(parsed, "currency") ??
+    ledger.chart?.find(account)?.currency.code ??
+    ledger.currenciesUsed()[0] ??
+    "GBP";
+  const imported = importStatement(raw, { currency: lookupCurrency(currencyCode), idPrefix: "BANK" });
+
+  const options: Parameters<typeof reconcile>[2] = {};
+  const windowText = stringFlag(parsed, "date-window");
+  if (windowText !== undefined) {
+    const days = Number(windowText);
+    if (!Number.isInteger(days) || days < 0) {
+      throw new ArgumentError(`--date-window wants a whole number of days, got "${windowText}"`);
+    }
+    options.dateWindowDays = days;
+  }
+  if (booleanFlag(parsed, "no-groups")) options.groupMatching = false;
+
+  const books = bankView(ledger, account, { currency: currencyCode });
+  const result = reconcile(books, imported.lines, options);
+  const bookClosingBalance = books.reduce(
+    (total, line) => total.plus(line.amount),
+    Money.zero(currencyCode),
+  );
+  const bankClosingBalance = statementClosingBalance(imported.lines, Money.zero(currencyCode));
+
+  const html = renderDashboard(
+    dashboardData({
+      ledger,
+      account,
+      books,
+      statement: imported.lines,
+      result,
+      bankClosingBalance,
+      bookClosingBalance,
+      statementFormat: imported.format,
+    }),
+  );
+
+  environment.writeFile(out, html);
+
+  const bridge = reconciliationBridge(result, { bankClosingBalance, bookClosingBalance });
+  return {
+    stdout: `Wrote ${out} — ${result.matched.length} matched, ${result.suggested.length} to review, ${Math.round(html.length / 1024)} KB, no network needed.`,
+    stderr: bridge.reconciled ? "" : "The reconciliation does not balance.\n",
+    code: bridge.reconciled ? 0 : 2,
+  };
+}
+
 const HANDLERS: Record<string, (environment: CliEnvironment, argv: readonly string[]) => CliResult> = {
   report: reportCommand,
   ageing: ageingCommand,
   reconcile: reconcileCommand,
   import: importCommand,
   accounts: accountsCommand,
+  dashboard: dashboardCommand,
 };
 
 /** Run one invocation. Never throws; every failure becomes an exit code. */

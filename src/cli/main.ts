@@ -3,7 +3,7 @@
  * function; this file exists to connect it to the process.
  */
 
-import { readFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { run } from "./run.js";
 import { date } from "../ledger/date.js";
 import type { CalendarDate } from "../ledger/date.js";
@@ -20,6 +20,7 @@ function today(): CalendarDate {
 
 const result = run(process.argv.slice(2), {
   readFile: (path: string) => readFileSync(path, "utf8"),
+  writeFile: (path: string, contents: string) => writeFileSync(path, contents, "utf8"),
   today,
 });
 

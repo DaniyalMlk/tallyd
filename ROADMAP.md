@@ -30,8 +30,9 @@ all disagree slightly.
 - [x] **5 — Reports and CLI.** Trial balance, P&L, balance sheet, ageing. A CLI
       that ingests a statement, reconciles it, and prints the review queue,
       with a JSON ledger document format underneath it.
-- [ ] **6 — Dashboard.** Ledger explorer and reconciliation review UI, with charts
-      for cash position and match-confidence distribution.
+- [x] **6 — Dashboard.** Ledger explorer and reconciliation review UI, with charts
+      for cash position and match-confidence distribution. One self-contained
+      HTML file: no CDN, no bundler, opens offline.
 - [ ] **7 — Polish.** Demo dataset generator, CI, performance pass over the matcher.
 
 ## Current state
@@ -75,13 +76,23 @@ all disagree slightly.
 | `src/cli/run.ts` | The five commands, as a pure function |
 | `src/demo/receivables.ts` | A quarter of sales with a real ageing profile |
 | `src/demo/statements.ts` | All four statements over that quarter |
+| `src/dashboard/model.ts` | The reconciliation flattened for the browser |
+| `src/dashboard/charts.ts` | Cash position and confidence, as hand-drawn SVG |
+| `src/dashboard/styles.ts` | The stylesheet, inlined |
+| `src/dashboard/script.ts` | Accept/reject, live bridge, ledger drill-down |
+| `src/dashboard/render.ts` | Page assembly and escaping |
 
-755 tests across 30 files, typecheck clean.
+789 tests across 31 files, typecheck clean.
 
 ## Known gaps
 
 - CI is not wired up. The intended pipeline is `npm run typecheck`, `npm test`,
   and the four demos.
+- Decisions made in the dashboard are not written back. Accepting a match
+  changes the page and nothing else; there is no way yet to emit the journal
+  entries a reviewed reconciliation implies.
+- The dashboard embeds every posting in the file. At a year of a busy account
+  that is a large page to open.
 - The CLI reads a whole ledger into memory on every invocation. Fine for a
   year of a small company, wrong for anything larger.
 - Ageing groups by reference alone, so an invoice and its credit note only

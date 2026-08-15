@@ -10,14 +10,16 @@ three invoices. That matching problem is what this project is actually about.
 
 ## Status
 
-Phases 1–5 of 7 are done; see [`ROADMAP.md`](./ROADMAP.md). The accounting core is
+Phases 1–6 of 7 are done; see [`ROADMAP.md`](./ROADMAP.md). The accounting core is
 complete and tested — money, the chart of accounts, journal entries, the ledger
 and the trial balance — and so is statement ingestion: CSV and OFX readers,
 format detection and duplicate flagging. The matching engine works end to end,
 including one-to-many and many-to-one matches, and produces a bank
 reconciliation statement that balances to the penny. On top of that sit the
-financial statements — income statement, balance sheet and ageing — and a CLI
-that runs the whole thing against files on disk. A dashboard is still to come.
+financial statements — income statement, balance sheet and ageing — a CLI that
+runs the whole thing against files on disk, and a dashboard that turns the
+review queue into something you can actually work through. What remains is
+phase 7: a demo dataset generator, CI, and a performance pass over the matcher.
 
 ## Running it
 
@@ -42,6 +44,7 @@ tallyd ageing    -l books.json -a 1130 --as-at 2026-09-30
 tallyd reconcile -l books.json -s statement.csv
 tallyd import    -s statement.csv          # what the reader made of it, no matching
 tallyd accounts  -l books.json
+tallyd dashboard -l books.json -s statement.csv -o reconciliation.html
 ```
 
 Every command takes `--json`. Exit codes carry meaning: `0` success, `1` a bad
@@ -140,6 +143,21 @@ Adjusted bank balance                             20621.70
 ...
 Reconciled                                            0.00
 ```
+
+## The dashboard
+
+`tallyd dashboard` writes one HTML file — inline styles, inline script, data
+embedded as JSON, nothing fetched. It opens from a file path on a machine with
+no network and no toolchain, which matters because the person who most needs to
+look at a reconciliation is often the one who cannot install anything.
+
+It is not a rendering of the CLI output. Accepting a suggestion moves it into
+the matched set and recomputes the bridge in front of you; rejecting one pushes
+both lines back into the leftovers. An undecided suggestion counts as
+outstanding on *both* sides, so the arithmetic is honest about what has not been
+confirmed yet. The ledger explorer lists every account that has been posted to,
+with grouping accounts rolled up, and drills into the postings behind any of
+them.
 
 ## Using it as a library
 
@@ -284,6 +302,22 @@ Nothing in the command layer touches `process` or `console`; the executable is
 twenty lines that connect the two. The whole CLI is therefore tested end to end
 against an in-memory filesystem, running the same code paths the binary does,
 with no spawning and no temp directories.
+
+**The dashboard does arithmetic in integer minor units, in the browser.** Every
+amount crosses into the page twice: once as a decimal string to display, once as
+a count of minor units to add up. Recomputing the bridge from formatted strings —
+or from floats parsed out of them — is how a reconciliation ends up out by a
+penny in the one place a penny matters. The test suite runs the client's bridge
+arithmetic over the embedded data for every possible subset of accept decisions
+and asserts the difference is exactly zero each time, so a page that would open
+showing a discrepancy fails in CI rather than in front of a user.
+
+**Charts are drawn by hand, and positioned by date.** Two charts do not justify
+shipping a charting engine inside a bookkeeping report, and a library would break
+the single-file promise. The cash position line places points by calendar date
+rather than by index — spacing ten movements evenly across a month draws a
+three-day gap and a thirteen-day gap the same width, which is a lie about the one
+axis the chart exists to show.
 
 ## Licence
 
