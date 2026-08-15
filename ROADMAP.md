@@ -27,8 +27,9 @@ all disagree slightly.
       fuzzy description scoring, one-to-many splits and many-to-one aggregations.
       Confidence scoring with per-rule explanations, optimal conflict resolution,
       and a bank reconciliation statement that bridges bank to ledger.
-- [ ] **5 — Reports and CLI.** Trial balance, P&L, balance sheet, ageing. A CLI
-      that ingests a statement, reconciles it, and prints the review queue.
+- [x] **5 — Reports and CLI.** Trial balance, P&L, balance sheet, ageing. A CLI
+      that ingests a statement, reconciles it, and prints the review queue,
+      with a JSON ledger document format underneath it.
 - [ ] **6 — Dashboard.** Ledger explorer and reconciliation review UI, with charts
       for cash position and match-confidence distribution.
 - [ ] **7 — Polish.** Demo dataset generator, CI, performance pass over the matcher.
@@ -65,13 +66,26 @@ all disagree slightly.
 | `src/demo/statement.ts` | The bank's view of that same month |
 | `src/demo/supplierRun.ts` | A batch payment and a lump-sum receipt |
 | `src/demo/reconcile.ts` | The two matched against each other |
+| `src/ledger/serialise.ts` | JSON document format, validated on load |
+| `src/reports/period.ts` | Movements over a range, balances as at a date |
+| `src/reports/incomeStatement.ts` | P&L with a comparative period |
+| `src/reports/balanceSheet.ts` | Balance sheet, period result folded into equity |
+| `src/reports/ageing.ts` | Open items and ageing buckets |
+| `src/cli/args.ts` | Argument parsing, written rather than installed |
+| `src/cli/run.ts` | The five commands, as a pure function |
+| `src/demo/receivables.ts` | A quarter of sales with a real ageing profile |
+| `src/demo/statements.ts` | All four statements over that quarter |
 
-636 tests across 24 files, typecheck clean.
+755 tests across 30 files, typecheck clean.
 
 ## Known gaps
 
 - CI is not wired up. The intended pipeline is `npm run typecheck`, `npm test`,
-  `npm run demo`, `npm run demo:ingest`, `npm run demo:reconcile`.
+  and the four demos.
+- The CLI reads a whole ledger into memory on every invocation. Fine for a
+  year of a small company, wrong for anything larger.
+- Ageing groups by reference alone, so an invoice and its credit note only
+  net off when they share one. There is no counterparty dimension yet.
 - Matching has no memory. A pair a reviewer confirms today teaches it nothing
   about the same counterparty next month, and it should — a confirmed match is
   the cheapest training signal available.

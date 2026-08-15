@@ -12,12 +12,16 @@
     "demo": "vite-node src/demo/main.ts",
     "demo:ingest": "vite-node src/demo/mainIngest.ts",
     "demo:reconcile": "vite-node src/demo/mainReconcile.ts",
-    "demo:reports": "vite-node src/demo/mainStatements.ts"
+    "demo:reports": "vite-node src/demo/mainStatements.ts",
+    "cli": "vite-node src/cli/main.ts --"
   },
   "devDependencies": {
     "@types/node": "^22.10.2",
     "fast-check": "^3.23.2",
     "typescript": "^5.7.2",
     "vitest": "^2.1.8"
+  },
+  "bin": {
+    "tallyd": "dist/src/cli/main.js"
   }
 }
