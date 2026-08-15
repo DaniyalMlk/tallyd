@@ -10,13 +10,14 @@ three invoices. That matching problem is what this project is actually about.
 
 ## Status
 
-Phases 1–4 of 7 are done; see [`ROADMAP.md`](./ROADMAP.md). The accounting core is
+Phases 1–5 of 7 are done; see [`ROADMAP.md`](./ROADMAP.md). The accounting core is
 complete and tested — money, the chart of accounts, journal entries, the ledger
 and the trial balance — and so is statement ingestion: CSV and OFX readers,
-format detection and duplicate flagging. The matching engine now works end to
-end, including one-to-many and many-to-one matches, and produces a bank
-reconciliation statement that balances to the penny. Reports, a CLI and a
-dashboard are still to come.
+format detection and duplicate flagging. The matching engine works end to end,
+including one-to-many and many-to-one matches, and produces a bank
+reconciliation statement that balances to the penny. On top of that sit the
+financial statements — income statement, balance sheet and ageing — and a CLI
+that runs the whole thing against files on disk. A dashboard is still to come.
 
 ## Running it
 
@@ -27,6 +28,36 @@ npm run typecheck
 npm run demo          # a worked month, posted and reported
 npm run demo:ingest   # the same month as the bank recorded it
 npm run demo:reconcile # the two, matched against each other
+npm run demo:reports  # income statement, balance sheet and ageing
+```
+
+## The command line
+
+```bash
+npm run build
+node dist/src/cli/main.js --help
+
+tallyd report    -l books.json --from 2026-07-01 --to 2026-09-30 --compare 2026-04-01:2026-06-30
+tallyd ageing    -l books.json -a 1130 --as-at 2026-09-30
+tallyd reconcile -l books.json -s statement.csv
+tallyd import    -s statement.csv          # what the reader made of it, no matching
+tallyd accounts  -l books.json
+```
+
+Every command takes `--json`. Exit codes carry meaning: `0` success, `1` a bad
+file or a bad flag, and `2` for work that ran to completion and came out wrong —
+a reconciliation that does not balance, a trial balance that does not agree. A
+CI job that treats an unbalanced reconciliation as a pass is worse than no CI
+job at all.
+
+```
+$ tallyd reconcile -l month.json -s bank.csv
+Reconciling 1110 against 12 statement lines
+  7 matched, 2 to review, 1 + 3 unmatched
+...
+Reconciled                                            0.00
+$ echo $?
+0
 ```
 
 `npm run demo` posts a month of transactions for a small consultancy and prints the
@@ -225,6 +256,34 @@ between the two closing balances has to live in the unmatched items. A matcher
 that pairs the wrong things still balances; a matcher that loses or double-counts
 a line cannot. The property test throws 400 random books-and-statement pairs at
 it and asserts the difference is exactly zero every time.
+
+**The balance sheet folds the period result into equity itself.** This ledger is
+append-only and never rewrites history, so nothing has been closed out to
+retained earnings — income and expense accounts still hold their balances.
+Report equity as it stands and the statement is out by exactly the profit for
+the period, every time. So the result goes in as its own visible line. It is not
+a fudge to make the two sides agree: it is what closing entries would post if
+they existed, and the identity underneath falls straight out of double entry.
+A test removes the fold and asserts the sheet then fails to balance, so the line
+cannot be deleted as redundant.
+
+**Ageing groups by reference, not by counterparty.** A receivables account is not
+a list of debts, it is a list of postings, some of which cancel others. Postings
+are grouped by external reference, netted, and the groups that do not reach zero
+are what is outstanding. Two invoices to the same customer age separately,
+because one may be current while the other is ninety days overdue — rolling them
+together hides exactly the item worth chasing. An item ages from its earliest
+posting, not its last: a part payment received today does not make a sixty-day
+debt current. An overpayment stays visible as a negative item, because filtering
+it out would be tidier and would quietly stop the ageing total tying to the
+account balance.
+
+**The CLI is a pure function.** `run(argv, environment)` takes its filesystem
+reader and its clock as parameters and returns stdout, stderr and an exit code.
+Nothing in the command layer touches `process` or `console`; the executable is
+twenty lines that connect the two. The whole CLI is therefore tested end to end
+against an in-memory filesystem, running the same code paths the binary does,
+with no spawning and no temp directories.
 
 ## Licence
 
