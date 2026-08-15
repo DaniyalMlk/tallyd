@@ -51,7 +51,7 @@ Account Name                            Debit      Credit
 
 The month is deliberately awkward in the ways real books are. A £480 card sale is
 captured on the 5th but settles on the 7th as £473.08, net of a 1.4% + 20p fee, so
-the deposit that reaches the bank matches no invoice exactly — the case the day-4
+the deposit that reaches the bank matches no invoice exactly — the case the
 matcher exists for. A £299 licence is split three ways across projects with no penny
 lost. An expense posted to the wrong account is corrected by reversal, not by
 editing history, so `JE-008` is still there next to the `JE-009` that undoes it.

@@ -6,7 +6,7 @@
  * are card descriptors rather than narrations, the settlement lands two days
  * after the sale and net of a fee, the dates are day-first, one row is a
  * duplicate of another, and there are two transactions the books know nothing
- * about yet. Everything the day-4 matcher has to cope with is already here.
+ * about yet. Everything the matcher has to cope with is already here.
  */
 
 export const DEMO_BANK_CSV = [
