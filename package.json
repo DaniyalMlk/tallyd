@@ -10,7 +10,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "demo": "vite-node src/demo/main.ts",
-    "demo:ingest": "vite-node src/demo/mainIngest.ts"
+    "demo:ingest": "vite-node src/demo/mainIngest.ts",
+    "demo:reconcile": "vite-node src/demo/mainReconcile.ts"
   },
   "devDependencies": {
     "@types/node": "^22.10.2",
