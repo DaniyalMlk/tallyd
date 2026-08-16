@@ -22,7 +22,6 @@
  */
 
 import type { CalendarDate } from "../ledger/date.js";
-import { daysBetween } from "../ledger/date.js";
 import type { StatementLine } from "../statement/line.js";
 import type { BookLine } from "./bankView.js";
 import {
@@ -34,7 +33,9 @@ import {
   scoreGroup,
 } from "./scoring.js";
 import { findSubsets } from "./subsetSum.js";
-import { maximumWeightMatching } from "./assignment.js";
+import { maximumWeightMatchingSparse, type WeightedEdge } from "./assignment.js";
+import { CandidateIndex } from "./candidates.js";
+import { toEpochDay } from "../ledger/date.js";
 
 export type MatchKind = "one-to-one" | "one-to-many" | "many-to-one";
 
@@ -82,10 +83,33 @@ export interface ReconciliationStats {
   readonly bookCoverage: number;
   /** True when every group search finished rather than hitting its budget. */
   readonly groupSearchExhaustive: boolean;
+  /**
+   * Pairs that got as far as being scored in the one-to-one pass.
+   *
+   * The interesting number is how it compares to `bookLines * statementLines`:
+   * everything else is a pair the amount-and-date index ruled out before the
+   * expensive text comparison ran.
+   */
+  readonly pairsScored: number;
 }
 
-function withinDays(a: CalendarDate, b: CalendarDate, days: number): boolean {
-  return Math.abs(daysBetween(a, b)) <= days;
+interface PoolItem {
+  readonly date: CalendarDate;
+  readonly epochDay: number;
+  readonly minorUnits: bigint;
+  readonly index: number;
+}
+
+/** First position in a day-sorted pool at or after `day`. */
+function firstAtOrAfter(pool: readonly PoolItem[], day: number): number {
+  let low = 0;
+  let high = pool.length;
+  while (low < high) {
+    const mid = (low + high) >> 1;
+    if ((pool[mid] as PoolItem).epochDay < day) low = mid + 1;
+    else high = mid;
+  }
+  return low;
 }
 
 interface GroupCandidate {
@@ -115,18 +139,56 @@ function gatherGroups(
   let exhaustive = true;
 
   // "one-to-many": one statement line explained by several ledger movements.
-  const statementItems = statement
-    .map((line, index) => ({ date: line.date, minorUnits: line.amount.minorUnits, index }))
+  const statementItems: PoolItem[] = statement
+    .map((line, index) => ({
+      date: line.date,
+      epochDay: toEpochDay(line.date),
+      minorUnits: line.amount.minorUnits,
+      index,
+    }))
     .filter((item) => statementTaken[item.index] !== true);
-  const bookItems = books
-    .map((book, index) => ({ date: book.date, minorUnits: book.amount.minorUnits, index }))
+  const bookItems: PoolItem[] = books
+    .map((book, index) => ({
+      date: book.date,
+      epochDay: toEpochDay(book.date),
+      minorUnits: book.amount.minorUnits,
+      index,
+    }))
     .filter((item) => bookTaken[item.index] !== true);
 
   const anchors = direction === "one-to-many" ? statementItems : bookItems;
   const pool = direction === "one-to-many" ? bookItems : statementItems;
 
+  // Sorted once by day so each anchor's window is a slice found by binary
+  // search. Re-filtering the whole pool per anchor is quadratic before the
+  // subset search — which is the expensive part — has even started.
+  const byDay = [...pool].sort((a, b) => a.epochDay - b.epochDay || a.index - b.index);
+
   for (const anchor of anchors) {
-    const nearby = pool.filter((item) => withinDays(item.date, anchor.date, windowDays));
+    const anchorSign = anchor.minorUnits > 0n ? 1 : anchor.minorUnits < 0n ? -1 : 0;
+    const start = firstAtOrAfter(byDay, anchor.epochDay - windowDays);
+    const nearby: PoolItem[] = [];
+    for (let i = start; i < byDay.length; i++) {
+      const item = byDay[i] as PoolItem;
+      if (item.epochDay > anchor.epochDay + windowDays) break;
+      // Only movements going the same way as the anchor. A supplier run is all
+      // outflows and a lump-sum receipt is all inflows; a "group" that mixes
+      // the two is money in and money out that happen to cancel, which is the
+      // artefact the direction gate exists to refuse.
+      //
+      // It also makes the search affordable. Subset-sum prunes on how much the
+      // remaining values could still contribute, and with both signs in the
+      // pool that band spans everything from the sum of all the debits to the
+      // sum of all the credits, so no branch can ever be ruled out. Same-sign
+      // values give a one-sided bound that kills whole subtrees at once.
+      const itemSign = item.minorUnits > 0n ? 1 : item.minorUnits < 0n ? -1 : 0;
+      if (anchorSign !== 0 && itemSign !== 0 && itemSign !== anchorSign) continue;
+      nearby.push(item);
+    }
+    // The window slice comes out in day order; the subset search and the
+    // scoring below both index into it, so put it back in input order to keep
+    // the answer identical to the sweep this replaced.
+    nearby.sort((a, b) => a.index - b.index);
     if (nearby.length < 2) continue;
 
     const search = findSubsets(
@@ -277,29 +339,40 @@ export function reconcile(
 
   // --- pass two: one-to-one, solved optimally ----------------------------
 
-  const bookIndices = books.map((_, i) => i).filter((i) => bookTaken[i] !== true);
-  const statementIndices = statement.map((_, i) => i).filter((i) => statementTaken[i] !== true);
-
+  // Amount, currency, sign and date are gates in the scorer: a pair failing any
+  // of them is rejected before its descriptions are ever compared. So they are
+  // asked of an index first, and only what survives gets scored. On real books
+  // that is a fraction of a percent of the cross product, and what is left is a
+  // sparse graph the solver can decompose instead of one dense matrix.
+  const pairIndex = new CandidateIndex(books);
   const scores = new Map<string, ScoredMatch>();
-  const weights: number[][] = bookIndices.map((bookIndex) =>
-    statementIndices.map((statementIndex) => {
-      const scored = scorePair(
-        books[bookIndex] as BookLine,
-        statement[statementIndex] as StatementLine,
-        options,
-      );
-      scores.set(`${bookIndex}:${statementIndex}`, scored);
-      return scored.rejectedBy !== null || scored.score < resolved.suggestScore
-        ? Number.NEGATIVE_INFINITY
-        : scored.score;
-    }),
-  );
+  const edges: WeightedEdge[] = [];
+  let pairsScored = 0;
 
-  const assignment = maximumWeightMatching(weights, { threshold: resolved.suggestScore });
+  statement.forEach((line, statementIndex) => {
+    if (statementTaken[statementIndex] === true) return;
+    const candidates = pairIndex.candidatesFor(
+      line,
+      resolved.amountToleranceMinorUnits,
+      resolved.dateWindowDays,
+    );
+    for (const bookIndex of candidates) {
+      if (bookTaken[bookIndex] === true) continue;
+      const scored = scorePair(books[bookIndex] as BookLine, line, options);
+      pairsScored += 1;
+      scores.set(`${bookIndex}:${statementIndex}`, scored);
+      if (scored.rejectedBy !== null || scored.score < resolved.suggestScore) continue;
+      edges.push({ row: bookIndex, col: statementIndex, weight: scored.score });
+    }
+  });
+
+  const assignment = maximumWeightMatchingSparse(edges, books.length, statement.length, {
+    threshold: resolved.suggestScore,
+  });
 
   for (const pair of assignment.pairs) {
-    const bookIndex = bookIndices[pair.row] as number;
-    const statementIndex = statementIndices[pair.col] as number;
+    const bookIndex = pair.row;
+    const statementIndex = pair.col;
     const scored = scores.get(`${bookIndex}:${statementIndex}`) as ScoredMatch;
 
     const match: Match = Object.freeze({
@@ -351,6 +424,7 @@ export function reconcile(
         statement.length === 0 ? 1 : matchedStatementCount / statement.length,
       bookCoverage: books.length === 0 ? 1 : matchedBookCount / books.length,
       groupSearchExhaustive,
+      pairsScored,
     }),
   });
 }
