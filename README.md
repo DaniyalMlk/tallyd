@@ -10,7 +10,7 @@ three invoices. That matching problem is what this project is actually about.
 
 ## Status
 
-Phases 1–7 are done; see [`ROADMAP.md`](./ROADMAP.md). The accounting core is
+Phases 1–8 are done; see [`ROADMAP.md`](./ROADMAP.md). The accounting core is
 complete and tested — money, the chart of accounts, journal entries, the ledger
 and the trial balance — and so is statement ingestion: CSV and OFX readers,
 format detection and duplicate flagging. The matching engine works end to end,
@@ -20,18 +20,19 @@ financial statements — income statement, balance sheet and ageing — a CLI th
 runs the whole thing against files on disk, and a dashboard that turns the
 review queue into something you can actually work through.
 
-The most recent work is the pair that made the matcher measurable: a seeded
-generator that builds books of any size *with the answer key*, and a performance
-pass measured against it. A year of a busy account — 715 ledger movements
-against 625 statement lines — went from 16.8 seconds to 0.2, and the accuracy
-figures either side of the change are identical. See
-[the performance section](#performance) for how.
+Two pieces of recent work are worth calling out. A seeded generator that builds
+books of any size *with the answer key*, and the performance pass measured
+against it: a year of a busy account — 715 ledger movements against 625
+statement lines — went from 16.8 seconds to 0.2 with identical accuracy either
+side. And a matcher that no longer forgets: a counterparty a reviewer confirms
+once is recognised the next month, which on generated books moved recall from
+75.6% to 89.0% and cut the review queue by 69%.
 
 ## Running it
 
 ```bash
 npm install
-npm test              # 915 tests
+npm test              # 995 tests
 npm run typecheck
 npm run demo          # a worked month, posted and reported
 npm run demo:ingest   # the same month as the bank recorded it
@@ -54,6 +55,8 @@ tallyd accounts  -l books.json
 tallyd dashboard -l books.json -s statement.csv -o reconciliation.html
 tallyd generate  -o ./fixtures --months 12 --invoices 30 --truth
 tallyd bench     --sizes 1:10,6:15,12:30
+tallyd learn     -m memory.json -d decisions.json
+tallyd reconcile -l books.json -s statement.csv -m memory.json
 ```
 
 Every command takes `--json`. Exit codes carry meaning: `0` success, `1` a bad
@@ -251,6 +254,82 @@ The worst case has not gone away and is not pretended away. Books where hundreds
 of movements share one amount and one date are a single component with no
 decomposition to exploit, and that stays a dense solve. It stays correct; it
 does not stay fast.
+
+## What it remembers
+
+Every month the same supplier arrives with a new reference. The bank writes
+`FPO ASHGROVE SUPPLIES 4471 BILL-3104` in March and `SO ASHGROVE SUPPLIES 8822
+BILL-3391` in April; the books say `Payment — Ashgrove Supplies` both times. The
+description rule scores the two months identically, so a pair a human confirmed
+in March lands back in the review queue in April, and in May, and for as long as
+anyone uses the tool. That is the cheapest training signal there is being thrown
+away — a confirmed match is a person asserting the identity the description rule
+is guessing at.
+
+What gets remembered is the **counterparty**, not the transaction. Transactions
+never repeat; counterparties do. Anything carrying a digit is a reference, a
+terminal id or a date, so it goes, and what is left is the name — stable on both
+sides, month after month.
+
+```bash
+tallyd learn -m memory.json -d decisions.json      # fold in what a reviewer decided
+tallyd learn -m memory.json --show                 # read back what it thinks it knows
+tallyd reconcile -l books.json -s statement.csv -m memory.json
+```
+
+```
+$ tallyd learn -m memory.json --show
+2 remembered pairings
+
+bank           ledger           yes/no  last seen
+BACS PAYROLL   NET PAY PAYROLL  1/0     2026-04-30
+PROPERTY RENT  MONTHLY RENT     1/0     2026-04-30
+```
+
+The file is plain JSON of exactly that, which is deliberate. A memory nobody can
+read is a memory nobody can correct, and being able to open it and delete a line
+is the difference between a tool that learns and a tool that quietly drifts.
+
+Three things are worth remembering, not one. A **confirmation** is evidence for.
+A **rejection** is evidence against, and outweighs a confirmation of the same
+pairing — proposing a pair a reviewer already refused is worse than proposing
+nothing, because it teaches them the queue is not worth reading. And a bank name
+seen before but only ever confirmed against a *different* ledger counterparty is
+evidence against too, which is the case that absence-of-memory would silently
+score as neutral.
+
+Measured on generated books — trained on one four-month period, then run against
+a different one with the same cast of customers and suppliers:
+
+| | auto-accepted | review queue | precision | recall |
+|---|---|---|---|---|
+| cold | 62 | 16 | 100% | 75.6% |
+| with memory | 73 | 5 | 100% | 89.0% |
+
+Eleven more matches went through unattended, the queue shrank by 69%, and not
+one of the extra matches was wrong. Precision is the number that makes the rest
+of the table mean anything: auto-accepting more is only an improvement if the
+extra ones are right.
+
+### What memory is not allowed to do
+
+It never overrides a gate. A remembered counterparty does not make a £40
+discrepancy acceptable, does not reconcile a debit against a credit, and does not
+pull a pair back inside the date window. It is weighted level with description —
+a reviewer's assertion should not count for less than the wording guess it
+replaces — and no higher, because it is evidence about *who*, not about *which
+transaction*: two payments to the same supplier in one week are remembered
+equally well. In practice it lifts a pair the numbers already agree on over the
+auto-accept line, and it cannot carry a weak one there on its own.
+
+It does get one veto. A pairing a reviewer has refused is denied the exact-match
+floor that would otherwise restore its score to 0.95 whatever else was known.
+Without that the refusal would change nothing, which is the one outcome
+guaranteed to make somebody stop using the review queue.
+
+With no memory supplied, scoring is exactly what it was before any of this
+existed — the rule contributes nothing and is not averaged in, the same
+treatment the reference rule gets when neither side carries one.
 
 ## Using it as a library
 

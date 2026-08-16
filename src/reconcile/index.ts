@@ -89,3 +89,15 @@ export {
   measureAccuracy,
   renderAccuracy,
 } from "./accuracy.js";
+
+export {
+  type Decision,
+  type MemoryEntry,
+  type MemoryKind,
+  type MemoryVerdict,
+  type MemoryDocument,
+  MatchMemory,
+  MemoryDocumentError,
+  counterpartyKey,
+  renderMemory,
+} from "./memory.js";

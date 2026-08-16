@@ -33,6 +33,12 @@ import {
 } from "../reconcile/bridge.js";
 import { measureAccuracy } from "../reconcile/accuracy.js";
 import {
+  MatchMemory,
+  MemoryDocumentError,
+  renderMemory,
+  type Decision,
+} from "../reconcile/memory.js";
+import {
   generateBooks,
   statementCsv,
   type GeneratorOptions,
@@ -102,6 +108,7 @@ const COMMANDS: Record<string, { describe: string; flags: FlagSpecs }> = {
       currency: { kind: "string", describe: "Statement currency (default: the chart's)", placeholder: "code" },
       "date-window": { kind: "string", describe: "Days either side a pair may differ", placeholder: "days" },
       "no-groups": { kind: "boolean", describe: "Disable one-to-many matching" },
+      memory: { kind: "string", short: "m", describe: "Confirmed counterparties (JSON)", placeholder: "file" },
     },
   },
   import: {
@@ -152,6 +159,16 @@ const COMMANDS: Record<string, { describe: string; flags: FlagSpecs }> = {
       currency: { kind: "string", describe: "Statement currency (default: the chart's)", placeholder: "code" },
       "date-window": { kind: "string", describe: "Days either side a pair may differ", placeholder: "days" },
       "no-groups": { kind: "boolean", describe: "Disable one-to-many matching" },
+      memory: { kind: "string", short: "m", describe: "Confirmed counterparties (JSON)", placeholder: "file" },
+    },
+  },
+  learn: {
+    describe: "Fold reviewed decisions into the counterparty memory",
+    flags: {
+      memory: { kind: "string", short: "m", describe: "Memory file, created if absent", placeholder: "file" },
+      decisions: { kind: "string", short: "d", describe: "Reviewed decisions (JSON)", placeholder: "file" },
+      show: { kind: "boolean", describe: "Print what is remembered and write nothing" },
+      json: { kind: "boolean", describe: "Emit JSON instead of text" },
     },
   },
 };
@@ -197,6 +214,23 @@ function parseBoundaries(text: string | undefined): readonly number[] | undefine
     });
   if (values.length === 0) throw new ArgumentError("--buckets needs at least one boundary");
   return values;
+}
+
+/**
+ * The memory named by `--memory`, or an empty one.
+ *
+ * A missing file is not an error the first time round: a reviewer who has not
+ * confirmed anything yet has an empty memory, and asking them to create a file
+ * full of nothing before they can reconcile would be silly.
+ */
+function loadMemory(environment: CliEnvironment, path: string | undefined): MatchMemory {
+  if (path === undefined) return MatchMemory.empty();
+  try {
+    return MatchMemory.fromJson(environment.readFile(path));
+  } catch (error) {
+    if (error instanceof MemoryDocumentError) throw error;
+    return MatchMemory.empty();
+  }
 }
 
 function bankAccountFor(ledger: Ledger, requested: string | undefined): string {
@@ -352,6 +386,8 @@ function reconcileCommand(environment: CliEnvironment, argv: readonly string[]):
     options.dateWindowDays = days;
   }
   if (booleanFlag(parsed, "no-groups")) options.groupMatching = false;
+  const memory = loadMemory(environment, stringFlag(parsed, "memory"));
+  if (memory.size > 0) options.memory = memory;
 
   const books = bankView(ledger, account, { currency: currencyCode });
   const result = reconcile(books, imported.lines, options);
@@ -408,6 +444,9 @@ function reconcileCommand(environment: CliEnvironment, argv: readonly string[]):
 
   const out: string[] = [];
   out.push(`Reconciling ${account} against ${result.stats.statementLines} statement lines`);
+  if (memory.size > 0) {
+    out.push(`  ${memory.size} remembered ${memory.size === 1 ? "counterparty" : "counterparties"} in play`);
+  }
   out.push(
     `  ${result.matched.length} matched, ${result.suggested.length} to review, ` +
       `${result.unmatchedBook.length} + ${result.unmatchedStatement.length} unmatched`,
@@ -531,6 +570,8 @@ function dashboardCommand(environment: CliEnvironment, argv: readonly string[]):
     options.dateWindowDays = days;
   }
   if (booleanFlag(parsed, "no-groups")) options.groupMatching = false;
+  const memory = loadMemory(environment, stringFlag(parsed, "memory"));
+  if (memory.size > 0) options.memory = memory;
 
   const books = bankView(ledger, account, { currency: currencyCode });
   const result = reconcile(books, imported.lines, options);
@@ -748,6 +789,93 @@ function benchCommand(_environment: CliEnvironment, argv: readonly string[]): Cl
   };
 }
 
+/**
+ * Fold a reviewer's decisions into the memory.
+ *
+ * The decisions file is deliberately dumb: a list of `{ statement, book,
+ * accepted, on }`. That is what a review UI can emit, what a script can build
+ * from a spreadsheet, and what a person can write by hand when they want to
+ * teach the matcher one thing without clicking through a queue to do it.
+ */
+function learnCommand(environment: CliEnvironment, argv: readonly string[]): CliResult {
+  const parsed = parseArgs(argv, (COMMANDS["learn"] as { flags: FlagSpecs }).flags);
+  const memoryPath = requiredFlag(parsed, "memory");
+  const existing = loadMemory(environment, memoryPath);
+
+  if (booleanFlag(parsed, "show")) {
+    if (booleanFlag(parsed, "json")) {
+      return { stdout: JSON.stringify(existing.toDocument(), null, 2), stderr: "", code: 0 };
+    }
+    return { stdout: renderMemory(existing), stderr: "", code: 0 };
+  }
+
+  if (environment.writeFile === undefined) {
+    return { stdout: "", stderr: "This environment cannot write files.\n", code: 1 };
+  }
+
+  const decisions = parseDecisions(environment.readFile(requiredFlag(parsed, "decisions")));
+  const updated = existing.learnAll(decisions);
+  environment.writeFile(memoryPath, updated.toJson());
+
+  const learned = updated.size - existing.size;
+  if (booleanFlag(parsed, "json")) {
+    return {
+      stdout: JSON.stringify(
+        { memory: memoryPath, decisions: decisions.length, pairings: updated.size, new: learned },
+        null,
+        2,
+      ),
+      stderr: "",
+      code: 0,
+    };
+  }
+
+  return {
+    stdout: [
+      `Read ${decisions.length} ${decisions.length === 1 ? "decision" : "decisions"}, wrote ${memoryPath}`,
+      `  ${updated.size} ${updated.size === 1 ? "pairing" : "pairings"} remembered, ${learned} new`,
+    ].join("\n"),
+    stderr: "",
+    code: 0,
+  };
+}
+
+function parseDecisions(text: string): readonly Decision[] {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch (error) {
+    throw new ArgumentError(
+      `The decisions file is not valid JSON: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+  if (!Array.isArray(parsed)) throw new ArgumentError("The decisions file must be a JSON array");
+
+  return parsed.map((value, index) => {
+    const raw = value as {
+      statement?: unknown;
+      book?: unknown;
+      accepted?: unknown;
+      on?: unknown;
+    };
+    if (typeof raw.statement !== "string" || typeof raw.book !== "string") {
+      throw new ArgumentError(`Decision ${index} needs a statement and a book description`);
+    }
+    if (typeof raw.accepted !== "boolean") {
+      throw new ArgumentError(`Decision ${index} needs accepted: true or false`);
+    }
+    if (typeof raw.on !== "string") {
+      throw new ArgumentError(`Decision ${index} needs the date it was decided`);
+    }
+    return {
+      statementDescription: raw.statement,
+      bookDescription: raw.book,
+      accepted: raw.accepted,
+      on: date(raw.on),
+    };
+  });
+}
+
 const HANDLERS: Record<string, (environment: CliEnvironment, argv: readonly string[]) => CliResult> = {
   report: reportCommand,
   ageing: ageingCommand,
@@ -756,6 +884,7 @@ const HANDLERS: Record<string, (environment: CliEnvironment, argv: readonly stri
   accounts: accountsCommand,
   generate: generateCommand,
   bench: benchCommand,
+  learn: learnCommand,
   dashboard: dashboardCommand,
 };
 
