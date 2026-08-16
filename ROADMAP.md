@@ -33,7 +33,16 @@ all disagree slightly.
 - [x] **6 — Dashboard.** Ledger explorer and reconciliation review UI, with charts
       for cash position and match-confidence distribution. One self-contained
       HTML file: no CDN, no bundler, opens offline.
-- [ ] **7 — Polish.** Demo dataset generator, CI, performance pass over the matcher.
+- [x] **7 — Books at scale.** A seeded generator that builds a ledger and the
+      bank statement to go with it at any size, carrying the ground truth of
+      which line came from which posting. An accuracy report scored against it,
+      a benchmark command, and a performance pass over the matcher: an
+      amount-and-date index in front of the pair pass, maximum-weight matching
+      solved per connected component, and group search bounded to one direction.
+- [ ] **8 — Matching memory.** A confirmed match is the cheapest training signal
+      there is, and the matcher currently forgets it. Learn counterparty rules
+      from reviewed decisions, persist them alongside the ledger, and feed them
+      back into scoring.
 
 ## Current state
 
@@ -81,8 +90,12 @@ all disagree slightly.
 | `src/dashboard/styles.ts` | The stylesheet, inlined |
 | `src/dashboard/script.ts` | Accept/reject, live bridge, ledger drill-down |
 | `src/dashboard/render.ts` | Page assembly and escaping |
+| `src/demo/random.ts` | Seeded xorshift, so generated books are reproducible |
+| `src/demo/generator.ts` | Books and the bank's version of them, at any size |
+| `src/reconcile/candidates.ts` | Amount-and-date index: which pairs are worth scoring |
+| `src/reconcile/accuracy.ts` | Precision and recall against the generator's truth |
 
-789 tests across 31 files, typecheck clean.
+915 tests across 38 files, typecheck clean.
 
 ## Known gaps
 
@@ -99,8 +112,14 @@ all disagree slightly.
   net off when they share one. There is no counterparty dimension yet.
 - Matching has no memory. A pair a reviewer confirms today teaches it nothing
   about the same counterparty next month, and it should — a confirmed match is
-  the cheapest training signal available.
-- Group matching is capped at four lines a side and never mixes directions, so a
-  batch that is itself paid in two instalments is out of reach.
-- The matcher holds both sides in memory and scores every surviving pair. Fine
-  for a month; the performance pass in phase 7 is where a year gets addressed.
+  the cheapest training signal available. This is phase 8.
+- Group matching is capped at four lines a side and, by design, never mixes
+  directions, so a batch that is itself paid in two instalments is out of reach.
+- The generator models one business shape — a small services company with
+  invoices, a supplier run, card takings and payroll. It says nothing about
+  books with foreign currency, intercompany transfers or a credit-card control
+  account, so the benchmark numbers describe that shape and not every shape.
+- The matcher still holds both sides in memory. A year of a busy account
+  reconciles in about a fifth of a second, but books where hundreds of movements
+  share one amount and one date collapse into a single graph component and get
+  the dense solve, which is cubic. Nothing streams; nothing is incremental.

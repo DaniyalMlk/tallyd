@@ -211,6 +211,156 @@ export function maximumWeightMatching(
   });
 }
 
+export interface WeightedEdge {
+  readonly row: number;
+  readonly col: number;
+  readonly weight: number;
+}
+
+/**
+ * Union-find over `rows + cols` nodes, columns offset by `rows`.
+ *
+ * Path compression only, no union by rank: the graphs here are small enough
+ * that the second optimisation buys nothing, and one fewer array is one fewer
+ * thing to get wrong.
+ */
+function componentsOf(edges: readonly WeightedEdge[], rows: number, cols: number): number[] {
+  const parent = Array.from({ length: rows + cols }, (_, i) => i);
+
+  const find = (node: number): number => {
+    let root = node;
+    while ((parent[root] as number) !== root) root = parent[root] as number;
+    let walk = node;
+    while ((parent[walk] as number) !== walk) {
+      const next = parent[walk] as number;
+      parent[walk] = root;
+      walk = next;
+    }
+    return root;
+  };
+
+  for (const edge of edges) {
+    const a = find(edge.row);
+    const b = find(rows + edge.col);
+    if (a !== b) parent[b] = a;
+  }
+
+  return parent.map((_, node) => find(node));
+}
+
+/**
+ * Maximum-weight matching on a *sparse* graph.
+ *
+ * The dense solver above needs a complete matrix and pads it to
+ * `(rows + cols)` square, so its cost is cubic in the total number of lines
+ * whether or not the pairs are plausible. On real books almost none of them
+ * are: amount and date rule out well over ninety-nine percent of pairs before
+ * anything is scored, and what remains is a graph of small islands — a handful
+ * of movements that share an amount and a fortnight, and nothing else.
+ *
+ * A matching cannot use an edge between two islands, because there is none. So
+ * each connected component can be solved on its own and the answers
+ * concatenated, and the result is exactly as optimal as solving the whole thing
+ * at once. The cost becomes cubic in the size of the largest island rather than
+ * in the size of the books.
+ *
+ * Where two edges have precisely equal weight the two approaches may pick
+ * different ones — both being, by definition, equally good. The total is what
+ * is guaranteed identical, and that is what the property tests pin.
+ */
+export function maximumWeightMatchingSparse(
+  edges: readonly WeightedEdge[],
+  rows: number,
+  cols: number,
+  options: AssignmentOptions = {},
+): AssignmentResult {
+  const threshold = options.threshold ?? -INF;
+
+  const usable = edges.filter((edge) => {
+    if (!Number.isFinite(edge.weight)) return false;
+    if (edge.row < 0 || edge.row >= rows) {
+      throw new AssignmentShapeError(`Edge row ${edge.row} is outside 0..${rows - 1}`);
+    }
+    if (edge.col < 0 || edge.col >= cols) {
+      throw new AssignmentShapeError(`Edge column ${edge.col} is outside 0..${cols - 1}`);
+    }
+    return true;
+  });
+
+  const roots = componentsOf(usable, rows, cols);
+  const byComponent = new Map<number, WeightedEdge[]>();
+  for (const edge of usable) {
+    const root = roots[edge.row] as number;
+    let group = byComponent.get(root);
+    if (group === undefined) {
+      group = [];
+      byComponent.set(root, group);
+    }
+    group.push(edge);
+  }
+
+  const pairs: AssignmentPair[] = [];
+
+  // Components in ascending order of their lowest row, so the answer does not
+  // depend on Map iteration order.
+  const ordered = [...byComponent.values()].sort(
+    (a, b) => Math.min(...a.map((e) => e.row)) - Math.min(...b.map((e) => e.row)),
+  );
+
+  for (const group of ordered) {
+    const localRows = [...new Set(group.map((edge) => edge.row))].sort((a, b) => a - b);
+    const localCols = [...new Set(group.map((edge) => edge.col))].sort((a, b) => a - b);
+    const rowAt = new Map(localRows.map((row, i) => [row, i]));
+    const colAt = new Map(localCols.map((col, j) => [col, j]));
+
+    // A component of one edge is the whole answer for that component; running
+    // a 2x2 Hungarian solve to discover it is pure overhead, and singletons are
+    // the overwhelming majority on real books.
+    if (group.length === 1) {
+      const only = group[0] as WeightedEdge;
+      if (only.weight >= threshold) pairs.push(Object.freeze({ ...only }));
+      continue;
+    }
+
+    const dense: number[][] = localRows.map(() => new Array<number>(localCols.length).fill(-INF));
+    for (const edge of group) {
+      const i = rowAt.get(edge.row) as number;
+      const j = colAt.get(edge.col) as number;
+      // Parallel edges should not exist, but if the caller supplies them the
+      // better one is the one that matters.
+      const existing = (dense[i] as number[])[j] as number;
+      if (edge.weight > existing) (dense[i] as number[])[j] = edge.weight;
+    }
+
+    const solved = maximumWeightMatching(dense, options);
+    for (const pair of solved.pairs) {
+      pairs.push(
+        Object.freeze({
+          row: localRows[pair.row] as number,
+          col: localCols[pair.col] as number,
+          weight: pair.weight,
+        }),
+      );
+    }
+  }
+
+  pairs.sort((a, b) => (a.row === b.row ? a.col - b.col : a.row - b.row));
+
+  const takenRows = new Set(pairs.map((pair) => pair.row));
+  const takenCols = new Set(pairs.map((pair) => pair.col));
+
+  return Object.freeze({
+    pairs: Object.freeze(pairs),
+    total: pairs.reduce((sum, pair) => sum + pair.weight, 0),
+    unassignedRows: Object.freeze(
+      Array.from({ length: rows }, (_, i) => i).filter((i) => !takenRows.has(i)),
+    ),
+    unassignedCols: Object.freeze(
+      Array.from({ length: cols }, (_, j) => j).filter((j) => !takenCols.has(j)),
+    ),
+  });
+}
+
 /**
  * Greedy matching — take the best remaining pair until nothing is left.
  *

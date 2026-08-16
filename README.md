@@ -10,7 +10,7 @@ three invoices. That matching problem is what this project is actually about.
 
 ## Status
 
-Phases 1–6 of 7 are done; see [`ROADMAP.md`](./ROADMAP.md). The accounting core is
+Phases 1–7 are done; see [`ROADMAP.md`](./ROADMAP.md). The accounting core is
 complete and tested — money, the chart of accounts, journal entries, the ledger
 and the trial balance — and so is statement ingestion: CSV and OFX readers,
 format detection and duplicate flagging. The matching engine works end to end,
@@ -18,19 +18,26 @@ including one-to-many and many-to-one matches, and produces a bank
 reconciliation statement that balances to the penny. On top of that sit the
 financial statements — income statement, balance sheet and ageing — a CLI that
 runs the whole thing against files on disk, and a dashboard that turns the
-review queue into something you can actually work through. What remains is
-phase 7: a demo dataset generator, CI, and a performance pass over the matcher.
+review queue into something you can actually work through.
+
+The most recent work is the pair that made the matcher measurable: a seeded
+generator that builds books of any size *with the answer key*, and a performance
+pass measured against it. A year of a busy account — 715 ledger movements
+against 625 statement lines — went from 16.8 seconds to 0.2, and the accuracy
+figures either side of the change are identical. See
+[the performance section](#performance) for how.
 
 ## Running it
 
 ```bash
 npm install
-npm test              # 636 tests
+npm test              # 915 tests
 npm run typecheck
 npm run demo          # a worked month, posted and reported
 npm run demo:ingest   # the same month as the bank recorded it
 npm run demo:reconcile # the two, matched against each other
 npm run demo:reports  # income statement, balance sheet and ageing
+npm run bench         # the matcher timed and scored over generated books
 ```
 
 ## The command line
@@ -45,6 +52,8 @@ tallyd reconcile -l books.json -s statement.csv
 tallyd import    -s statement.csv          # what the reader made of it, no matching
 tallyd accounts  -l books.json
 tallyd dashboard -l books.json -s statement.csv -o reconciliation.html
+tallyd generate  -o ./fixtures --months 12 --invoices 30 --truth
+tallyd bench     --sizes 1:10,6:15,12:30
 ```
 
 Every command takes `--json`. Exit codes carry meaning: `0` success, `1` a bad
@@ -158,6 +167,90 @@ outstanding on *both* sides, so the arithmetic is honest about what has not been
 confirmed yet. The ledger explorer lists every account that has been posted to,
 with grouping accounts rolled up, and drills into the postings behind any of
 them.
+
+## Generated books, and performance
+
+Everything above was developed against a hand-written month: a dozen statement
+lines, a couple of dozen postings. That is enough to prove the logic and nothing
+like enough to prove it scales, so `tallyd generate` builds books of any size.
+
+It is seeded, so the same seed produces the same books byte for byte, and it is
+deliberately awkward in the ways real books are — settlement lag, processor fees
+netted off the deposit, batch supplier runs that leave the bank as one debit,
+charges nobody booked, cheques that clear next period, and descriptors written
+the way a bank writes them rather than the way a bookkeeper does.
+
+The part that matters most is `--truth`: because the generator built both sides,
+it knows which statement line really came from which posting. That answer key is
+what turns a benchmark from "how fast" into "how fast, and still right".
+
+```bash
+tallyd generate -o ./fixtures --months 12 --invoices 30 --truth
+tallyd bench --sizes 1:10,6:15,12:30,24:40 --repeat 2
+```
+
+```
+   size  books  lines      ms  scored    prec    rec   rec+
+ 1m x10     22     20     3.2   4.09%  100.0%  79.0%  94.7%
+ 3m x12     77     70     6.2   1.21%  100.0%  76.5%  95.6%
+ 6m x15    189    171    12.3   0.50%  100.0%  73.5%  96.4%
+12m x15    380    329    23.0   0.24%  100.0%  72.7%  95.9%
+12m x30    715    625   189.4   0.13%  100.0%  76.9%  96.7%
+24m x40   1916   1657  1655.4   0.05%  100.0%  77.5%  96.6%
+```
+
+Precision is 100% at every size: the matcher never auto-accepted a pairing the
+generator says is wrong. That is the number to watch, because the two kinds of
+error are not equally bad. A missed match costs a reviewer a minute; a *wrong*
+match costs them an afternoon, because the evidence has been consumed and the
+two lines that should have gone together are now stranded elsewhere in the
+report. `rec` is what went through unattended and `rec+` counts a correct
+suggestion as found, which is what a reviewer actually experiences.
+
+<h3 id="performance">What made it fast</h3>
+
+The 12m x30 row took **16.8 seconds** before this work and takes **0.2** now,
+from two changes. Both came from taking the scorer's own structure seriously
+rather than from micro-optimisation.
+
+**The one-to-one pass was scoring every pair.** All of them: 715 x 625 is
+446,875 comparisons, each running Levenshtein and Jaro-Winkler over two
+descriptions to produce, 99.9% of the time, a rejection. But the scorer's first
+rules are *gates*, not contributions — a pair dies outright if the currencies
+differ, if the amounts differ by more than the tolerance, if the signs disagree,
+or if the dates fall outside the window. Three of those four are indexable. So
+book lines are bucketed by currency and amount and kept sorted by date, and a
+statement line's candidates are a map lookup plus a binary search. The `scored`
+column above is the share that survived to be scored at all — 0.13% on that row.
+
+The index's contract is exact rather than approximate: it admits precisely the
+pairs the scorer would not reject, never a superset and never a subset. Blocking
+that quietly dropped a real pair would cost recall while looking like a speedup,
+which is why the equivalence is a property test rather than a comment.
+
+**What survives is sparse, so it decomposes.** The Hungarian solver needs a
+complete matrix and pads it to `(rows + cols)` square, making it cubic in the
+total number of lines whether or not the pairs are plausible. But a matching
+cannot use an edge between two components of a graph, because there is none — so
+each connected component is solved on its own and the answers concatenated. The
+result is exactly as optimal as solving the whole thing at once; the cost
+becomes cubic in the largest island rather than in the size of the books.
+
+**Group matching was searching both directions at once.** Finding which
+invoices add up to one batch debit is subset-sum, pruned by bounds on what the
+remaining values could still contribute. With inflows and outflows in the same
+pool that bound spans everything from the sum of all the debits to the sum of
+all the credits, so no branch can ever be ruled out and the search degenerates.
+Restricting the pool to movements going the same way as the anchor is what the
+direction gate already implies — a supplier run is all outflows, a lump-sum
+receipt all inflows — and it took the group pass from 8.3 seconds to 0.2. It is
+also more correct: a "group" mixing directions is money in and money out that
+happen to cancel, which is exactly the coincidence the matcher should refuse.
+
+The worst case has not gone away and is not pretended away. Books where hundreds
+of movements share one amount and one date are a single component with no
+decomposition to exploit, and that stays a dense solve. It stays correct; it
+does not stay fast.
 
 ## Using it as a library
 

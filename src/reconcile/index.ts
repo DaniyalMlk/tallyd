@@ -34,10 +34,20 @@ export {
   type AssignmentPair,
   type AssignmentResult,
   type AssignmentOptions,
+  type WeightedEdge,
   AssignmentShapeError,
   maximumWeightMatching,
+  maximumWeightMatchingSparse,
   greedyMatching,
 } from "./assignment.js";
+
+export {
+  type Gateable,
+  type CandidatePair,
+  type CandidateIndexStats,
+  CandidateIndex,
+  candidatePairs,
+} from "./candidates.js";
 
 export {
   type RuleName,
@@ -71,3 +81,11 @@ export {
   statementClosingBalance,
   renderReconciliationBridge,
 } from "./bridge.js";
+
+export {
+  type TruthLink,
+  type AccuracyReport,
+  type AccuracyFailure,
+  measureAccuracy,
+  renderAccuracy,
+} from "./accuracy.js";
