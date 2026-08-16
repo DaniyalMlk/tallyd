@@ -39,10 +39,15 @@ all disagree slightly.
       a benchmark command, and a performance pass over the matcher: an
       amount-and-date index in front of the pair pass, maximum-weight matching
       solved per connected component, and group search bounded to one direction.
-- [ ] **8 — Matching memory.** A confirmed match is the cheapest training signal
-      there is, and the matcher currently forgets it. Learn counterparty rules
-      from reviewed decisions, persist them alongside the ledger, and feed them
-      back into scoring.
+- [x] **8 — Matching memory.** Counterparty keys learnt from confirmed and
+      refused decisions, persisted as plain JSON, and fed back into scoring as a
+      rule that explains what it recalls. Rejections outweigh confirmations and
+      veto the exact-match floor; a name only ever confirmed elsewhere counts
+      against. `tallyd learn` folds a reviewer's decisions in.
+- [ ] **9 — Closing the loop.** The dashboard can accept and reject but cannot
+      write either back. Emit decisions from the review UI, and emit the journal
+      entries a reviewed reconciliation implies, so the two ends of the cycle
+      meet without a human retyping anything.
 
 ## Current state
 
@@ -94,25 +99,30 @@ all disagree slightly.
 | `src/demo/generator.ts` | Books and the bank's version of them, at any size |
 | `src/reconcile/candidates.ts` | Amount-and-date index: which pairs are worth scoring |
 | `src/reconcile/accuracy.ts` | Precision and recall against the generator's truth |
+| `src/reconcile/memory.ts` | Counterparty keys learnt from reviewed decisions |
 
-915 tests across 38 files, typecheck clean.
+995 tests across 42 files, typecheck clean.
 
 ## Known gaps
 
 - CI is not wired up. The intended pipeline is `npm run typecheck`, `npm test`,
   and the four demos.
 - Decisions made in the dashboard are not written back. Accepting a match
-  changes the page and nothing else; there is no way yet to emit the journal
-  entries a reviewed reconciliation implies.
+  changes the page and nothing else; it cannot yet emit the decisions file
+  `tallyd learn` reads, nor the journal entries a reviewed reconciliation
+  implies. Both ends of that loop exist and nothing joins them — phase 9.
 - The dashboard embeds every posting in the file. At a year of a busy account
   that is a large page to open.
 - The CLI reads a whole ledger into memory on every invocation. Fine for a
   year of a small company, wrong for anything larger.
 - Ageing groups by reference alone, so an invoice and its credit note only
   net off when they share one. There is no counterparty dimension yet.
-- Matching has no memory. A pair a reviewer confirms today teaches it nothing
-  about the same counterparty next month, and it should — a confirmed match is
-  the cheapest training signal available. This is phase 8.
+- Memory is keyed on the counterparty name and nothing else. Two suppliers whose
+  names normalise to the same tokens share one entry, and a business that renames
+  itself starts again from nothing.
+- Memory never ages. A pairing confirmed once three years ago counts exactly as
+  much as one confirmed last month, and `lastSeen` is recorded but not yet used
+  to decay anything.
 - Group matching is capped at four lines a side and, by design, never mixes
   directions, so a batch that is itself paid in two instalments is out of reach.
 - The generator models one business shape — a small services company with
