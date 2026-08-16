@@ -18,7 +18,7 @@ import { currency as lookupCurrency } from "../money/currency.js";
 import { date, dateRange } from "../ledger/date.js";
 import type { CalendarDate } from "../ledger/date.js";
 import type { Ledger } from "../ledger/ledger.js";
-import { ledgerFromJson } from "../ledger/serialise.js";
+import { ledgerFromJson, ledgerToJson } from "../ledger/serialise.js";
 import { renderTrialBalance, trialBalance } from "../ledger/trialBalance.js";
 import { importStatement } from "../statement/index.js";
 import { incomeStatement, renderIncomeStatement } from "../reports/incomeStatement.js";
@@ -31,6 +31,12 @@ import {
   renderReconciliationBridge,
   statementClosingBalance,
 } from "../reconcile/bridge.js";
+import { measureAccuracy } from "../reconcile/accuracy.js";
+import {
+  generateBooks,
+  statementCsv,
+  type GeneratorOptions,
+} from "../demo/generator.js";
 import { dashboardData } from "../dashboard/model.js";
 import { renderDashboard } from "../dashboard/render.js";
 import {
@@ -109,6 +115,32 @@ const COMMANDS: Record<string, { describe: string; flags: FlagSpecs }> = {
   accounts: {
     describe: "Render the chart of accounts",
     flags: { ...COMMON },
+  },
+  generate: {
+    describe: "Write a synthetic ledger and the bank statement that goes with it",
+    flags: {
+      out: { kind: "string", short: "o", describe: "Directory to write into", placeholder: "dir" },
+      seed: { kind: "string", describe: "Same seed, same books (default 1)", placeholder: "n" },
+      months: { kind: "string", describe: "Months to generate (default 3)", placeholder: "n" },
+      invoices: { kind: "string", describe: "Invoices a month (default 12)", placeholder: "n" },
+      start: { kind: "string", describe: "First day (default 2026-01-01)", placeholder: "date" },
+      currency: { kind: "string", describe: "Currency (default GBP)", placeholder: "code" },
+      truth: { kind: "boolean", describe: "Also write the ground-truth links as JSON" },
+      json: { kind: "boolean", describe: "Emit JSON instead of text" },
+    },
+  },
+  bench: {
+    describe: "Time the matcher over generated books of increasing size",
+    flags: {
+      seed: { kind: "string", describe: "Same seed, same books (default 1)", placeholder: "n" },
+      sizes: {
+        kind: "string",
+        describe: "Sizes as months:invoices (default 1:10,3:12,6:15,12:15)",
+        placeholder: "m:i,...",
+      },
+      repeat: { kind: "string", describe: "Runs per size, fastest wins (default 1)", placeholder: "n" },
+      json: { kind: "boolean", describe: "Emit JSON instead of text" },
+    },
   },
   dashboard: {
     describe: "Write a self-contained HTML reconciliation dashboard",
@@ -531,12 +563,199 @@ function dashboardCommand(environment: CliEnvironment, argv: readonly string[]):
   };
 }
 
+// ------------------------------------------------------ generate and bench
+
+/** A positive whole number from a flag, or the default. */
+function countFlag(parsed: ReturnType<typeof parseArgs>, name: string, fallback: number): number {
+  const text = stringFlag(parsed, name);
+  if (text === undefined) return fallback;
+  const value = Number(text);
+  if (!Number.isInteger(value) || value <= 0) {
+    throw new ArgumentError(`--${name} wants a positive whole number, got "${text}"`);
+  }
+  return value;
+}
+
+function generatorOptionsFrom(parsed: ReturnType<typeof parseArgs>): GeneratorOptions {
+  const options: GeneratorOptions = {
+    seed: countFlag(parsed, "seed", 1),
+    months: countFlag(parsed, "months", 3),
+    invoicesPerMonth: countFlag(parsed, "invoices", 12),
+  };
+  const start = stringFlag(parsed, "start");
+  const code = stringFlag(parsed, "currency");
+  return {
+    ...options,
+    ...(start === undefined ? {} : { start: date(start) }),
+    ...(code === undefined ? {} : { currency: lookupCurrency(code) }),
+  };
+}
+
+function generateCommand(environment: CliEnvironment, argv: readonly string[]): CliResult {
+  const parsed = parseArgs(argv, (COMMANDS["generate"] as { flags: FlagSpecs }).flags);
+  if (environment.writeFile === undefined) {
+    return { stdout: "", stderr: "This environment cannot write files.\n", code: 1 };
+  }
+
+  const directory = stringFlag(parsed, "out") ?? ".";
+  const generated = generateBooks(generatorOptionsFrom(parsed));
+
+  const ledgerPath = `${directory}/books.json`;
+  const statementPath = `${directory}/statement.csv`;
+  environment.writeFile(ledgerPath, ledgerToJson(generated.ledger));
+  environment.writeFile(statementPath, statementCsv(generated));
+
+  const written = [ledgerPath, statementPath];
+  if (booleanFlag(parsed, "truth")) {
+    const truthPath = `${directory}/truth.json`;
+    environment.writeFile(truthPath, `${JSON.stringify(generated.truth, null, 2)}\n`);
+    written.push(truthPath);
+  }
+
+  if (booleanFlag(parsed, "json")) {
+    return {
+      stdout: JSON.stringify({ written, summary: generated.summary }, null, 2),
+      stderr: "",
+      code: 0,
+    };
+  }
+
+  const summary = generated.summary;
+  return {
+    stdout: [
+      `Wrote ${written.join(", ")}`,
+      `  ${summary.entries} journal entries, ${summary.statementLines} statement lines`,
+      `  ${summary.explainable} lines a matcher could explain, of which ${summary.grouped} are batches`,
+      `  ${summary.bankOnly} bank-only, ${summary.ledgerOnly} still outstanding`,
+    ].join("\n"),
+    stderr: "",
+    code: 0,
+  };
+}
+
+interface BenchSize {
+  readonly months: number;
+  readonly invoices: number;
+}
+
+function parseSizes(text: string | undefined): readonly BenchSize[] {
+  if (text === undefined) {
+    return [
+      { months: 1, invoices: 10 },
+      { months: 3, invoices: 12 },
+      { months: 6, invoices: 15 },
+      { months: 12, invoices: 15 },
+    ];
+  }
+  const sizes = text
+    .split(",")
+    .map((part) => part.trim())
+    .filter((part) => part !== "")
+    .map((part) => {
+      const [months, invoices] = part.split(":");
+      const m = Number(months);
+      const i = Number(invoices);
+      if (!Number.isInteger(m) || m <= 0 || !Number.isInteger(i) || i <= 0) {
+        throw new ArgumentError(`--sizes wants months:invoices pairs, got "${part}"`);
+      }
+      return { months: m, invoices: i };
+    });
+  if (sizes.length === 0) throw new ArgumentError("--sizes needs at least one size");
+  return sizes;
+}
+
+/**
+ * Time the matcher, and check it is still right while doing so.
+ *
+ * A benchmark that only reports wall time is a benchmark that will eventually
+ * celebrate a matcher that stopped matching. The generator knows which lines
+ * really belong together, so every timed run is scored against that too, and
+ * the accuracy columns sit next to the milliseconds.
+ */
+function benchCommand(_environment: CliEnvironment, argv: readonly string[]): CliResult {
+  const parsed = parseArgs(argv, (COMMANDS["bench"] as { flags: FlagSpecs }).flags);
+  const seed = countFlag(parsed, "seed", 1);
+  const repeat = countFlag(parsed, "repeat", 1);
+  const sizes = parseSizes(stringFlag(parsed, "sizes"));
+
+  const rows = sizes.map((size) => {
+    const generated = generateBooks({
+      seed,
+      months: size.months,
+      invoicesPerMonth: size.invoices,
+    });
+    const books = bankView(generated.ledger, generated.bankAccount);
+
+    let best = Number.POSITIVE_INFINITY;
+    let result = reconcile(books, generated.statement);
+    for (let run = 0; run < repeat; run++) {
+      const started = performance.now();
+      result = reconcile(books, generated.statement);
+      best = Math.min(best, performance.now() - started);
+    }
+
+    const accuracy = measureAccuracy(result, generated.truth);
+    const cross = books.length * generated.statement.length;
+    return {
+      months: size.months,
+      invoices: size.invoices,
+      bookLines: books.length,
+      statementLines: generated.statement.length,
+      milliseconds: Number(best.toFixed(1)),
+      pairsScored: result.stats.pairsScored,
+      /** Share of the full cross product that reached the scorer. */
+      scoredShare: cross === 0 ? 0 : Number((result.stats.pairsScored / cross).toFixed(5)),
+      precision: Number(accuracy.precision.toFixed(4)),
+      recall: Number(accuracy.recall.toFixed(4)),
+      recallWithSuggestions: Number(accuracy.recallWithSuggestions.toFixed(4)),
+    };
+  });
+
+  if (booleanFlag(parsed, "json")) {
+    return { stdout: JSON.stringify({ seed, repeat, rows }, null, 2), stderr: "", code: 0 };
+  }
+
+  const header = ["size", "books", "lines", "ms", "scored", "prec", "rec", "rec+"];
+  const body = rows.map((row) => [
+    `${row.months}m x${row.invoices}`,
+    String(row.bookLines),
+    String(row.statementLines),
+    row.milliseconds.toFixed(1),
+    `${(row.scoredShare * 100).toFixed(2)}%`,
+    `${(row.precision * 100).toFixed(1)}%`,
+    `${(row.recall * 100).toFixed(1)}%`,
+    `${(row.recallWithSuggestions * 100).toFixed(1)}%`,
+  ]);
+
+  const widths = header.map((cell, column) =>
+    Math.max(cell.length, ...body.map((row) => (row[column] as string).length)),
+  );
+  const format = (cells: readonly string[]): string =>
+    cells.map((cell, column) => cell.padStart(widths[column] as number)).join("  ");
+
+  return {
+    stdout: [
+      `Matcher over generated books, seed ${seed}, best of ${repeat}`,
+      "",
+      format(header),
+      ...body.map(format),
+      "",
+      "scored is the share of all possible pairs that reached the scorer;",
+      "rec+ counts a correct suggestion as found, which is what a reviewer sees.",
+    ].join("\n"),
+    stderr: "",
+    code: 0,
+  };
+}
+
 const HANDLERS: Record<string, (environment: CliEnvironment, argv: readonly string[]) => CliResult> = {
   report: reportCommand,
   ageing: ageingCommand,
   reconcile: reconcileCommand,
   import: importCommand,
   accounts: accountsCommand,
+  generate: generateCommand,
+  bench: benchCommand,
   dashboard: dashboardCommand,
 };
 
