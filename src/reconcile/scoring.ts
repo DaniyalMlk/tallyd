@@ -23,8 +23,9 @@ import { daysBetween } from "../ledger/date.js";
 import type { StatementLine } from "../statement/line.js";
 import type { BookLine } from "./bankView.js";
 import { similarityBreakdown } from "./similarity.js";
+import type { MatchMemory } from "./memory.js";
 
-export type RuleName = "amount" | "direction" | "date" | "description" | "reference";
+export type RuleName = "amount" | "direction" | "date" | "description" | "reference" | "memory";
 
 export interface MatchReason {
   readonly rule: RuleName;
@@ -57,6 +58,7 @@ export interface ScoringWeights {
   readonly date: number;
   readonly description: number;
   readonly reference: number;
+  readonly memory: number;
 }
 
 export interface ScoringOptions {
@@ -69,6 +71,12 @@ export interface ScoringOptions {
   autoAcceptScore?: number;
   /** Score below which a pair is not worth showing at all. Default 0.45. */
   suggestScore?: number;
+  /**
+   * What a reviewer has already confirmed or refused. Omit it and the memory
+   * rule never applies, and scoring is exactly what it was before memory
+   * existed.
+   */
+  memory?: MatchMemory;
 }
 
 export interface ResolvedScoringOptions {
@@ -77,6 +85,7 @@ export interface ResolvedScoringOptions {
   readonly weights: ScoringWeights;
   readonly autoAcceptScore: number;
   readonly suggestScore: number;
+  readonly memory: MatchMemory | undefined;
 }
 
 /**
@@ -91,6 +100,14 @@ export const DEFAULT_WEIGHTS: ScoringWeights = Object.freeze({
   date: 0.25,
   description: 0.3,
   reference: 0.15,
+  // Level with description, and for a reason that is worth stating: a reviewer
+  // confirming a counterparty is a person asserting the identity the
+  // description rule is guessing at, so it should not count for less than the
+  // guess. It is deliberately not higher. Memory is evidence about *who*, not
+  // about *which transaction* — two payments to the same supplier in one week
+  // are remembered equally well — so it lifts a pair the numbers already agree
+  // on over the auto-accept line and cannot carry one there on its own.
+  memory: 0.3,
 });
 
 export function resolveScoringOptions(options: ScoringOptions = {}): ResolvedScoringOptions {
@@ -100,6 +117,7 @@ export function resolveScoringOptions(options: ScoringOptions = {}): ResolvedSco
     weights: Object.freeze({ ...DEFAULT_WEIGHTS, ...(options.weights ?? {}) }),
     autoAcceptScore: options.autoAcceptScore ?? 0.86,
     suggestScore: options.suggestScore ?? 0.45,
+    memory: options.memory,
   });
 }
 
@@ -291,12 +309,43 @@ function scoreSides(sides: Sides, resolved: ResolvedScoringOptions): ScoredMatch
     );
   }
 
+  // --- what the reviewer already told us ---------------------------------
+  //
+  // Weighted only when there is something to say. A pair involving a
+  // counterparty nobody has ever ruled on should score exactly as it did before
+  // memory existed, so an absent memory contributes nothing and is not averaged
+  // in — the same treatment the reference rule gets when neither side carries
+  // one.
+
+  const memoryVerdict = resolved.memory?.recall(
+    sides.statementDescription,
+    sides.bookDescription,
+  );
+  const remembered = memoryVerdict !== undefined && memoryVerdict.kind !== "unknown";
+
+  reasons.push(
+    Object.freeze({
+      rule: "memory" as const,
+      detail: memoryVerdict?.detail ?? "nothing remembered about this counterparty",
+      score: memoryVerdict?.score ?? 0,
+      weight: remembered ? resolved.weights.memory : 0,
+      contribution: remembered ? (memoryVerdict?.score ?? 0) * resolved.weights.memory : 0,
+    }),
+  );
+
   const totalWeight = reasons.reduce((sum, reason) => sum + reason.weight, 0);
   const averaged =
     totalWeight === 0 ? 0 : reasons.reduce((sum, reason) => sum + reason.contribution, 0) / totalWeight;
 
   const referenceHit = shared.length > 0;
-  const exact = amountGap === 0n && dayGap === 0 && (referenceHit || similarity.score >= 0.9);
+
+  // A reviewer who has already refused this pairing outranks the evidence that
+  // would otherwise call it exact. Without this the floor below would restore
+  // the score to 0.95 and the refusal would have changed nothing, which is the
+  // one outcome guaranteed to make somebody stop using the review queue.
+  const vetoed = memoryVerdict?.kind === "rejected" || memoryVerdict?.kind === "contradicted";
+  const exact =
+    !vetoed && amountGap === 0n && dayGap === 0 && (referenceHit || similarity.score >= 0.9);
 
   // Same penny, same day, and an external reference both sides agree on is
   // about as good as reconciliation evidence gets. When all three line up the
