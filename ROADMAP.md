@@ -44,10 +44,19 @@ all disagree slightly.
       rule that explains what it recalls. Rejections outweigh confirmations and
       veto the exact-match floor; a name only ever confirmed elsewhere counts
       against. `tallyd learn` folds a reviewer's decisions in.
-- [ ] **9 — Closing the loop.** The dashboard can accept and reject but cannot
-      write either back. Emit decisions from the review UI, and emit the journal
-      entries a reviewed reconciliation implies, so the two ends of the cycle
-      meet without a human retyping anything.
+- [x] **9 — Closing the loop.** The decisions document as a format both ends
+      depend on, with the payload for each suggestion computed in TypeScript and
+      the browser stamping only a verdict and a date. Export and undo in the
+      review UI. Then the other direction: ordered classification rules from
+      description and direction to an account, entry ids derived from the
+      statement line's fingerprint so a re-import is a no-op, a `post` command
+      that proposes or applies, and a dashboard section showing what the current
+      state of the review implies, recomputed as decisions are made.
+
+- [ ] **10 — Multi-currency.** Everything holds one currency at a time. A
+      business that invoices in euros and banks in sterling has a revaluation
+      problem the ledger can represent and nothing yet computes: rate sources,
+      the gain or loss on settlement, and a translation of the statements.
 
 ## Current state
 
@@ -100,17 +109,30 @@ all disagree slightly.
 | `src/reconcile/candidates.ts` | Amount-and-date index: which pairs are worth scoring |
 | `src/reconcile/accuracy.ts` | Precision and recall against the generator's truth |
 | `src/reconcile/memory.ts` | Counterparty keys learnt from reviewed decisions |
+| `src/reconcile/decisions.ts` | The decisions document, and what a match emits |
+| `src/reconcile/posting.ts` | Classification rules and the entries a statement implies |
 
-995 tests across 42 files, typecheck clean.
+1150 tests across 46 files, typecheck clean.
 
 ## Known gaps
 
 - CI is not wired up. The intended pipeline is `npm run typecheck`, `npm test`,
   and the four demos.
-- Decisions made in the dashboard are not written back. Accepting a match
-  changes the page and nothing else; it cannot yet emit the decisions file
-  `tallyd learn` reads, nor the journal entries a reviewed reconciliation
-  implies. Both ends of that loop exist and nothing joins them — phase 9.
+- The classification rules are a starting point and not a claim about anybody's
+  business. They are written against the standard chart, in English, for a UK
+  bank's descriptors; a different chart needs `--rules` and a different country
+  needs most of them rewritten.
+- A statement line the matcher merely failed to match looks exactly like a line
+  the books are missing. `post` only proposes for lines with no suggestion at
+  all, and a reviewer's rejection is applied directly rather than through the
+  score — but `--suspense` will still book a missed match if one gets that far,
+  and the command can only warn about it.
+- Nothing learns from a classification. A reviewer who moves an entry from the
+  suspense account to 5400 has stated a fact as useful as a confirmed match,
+  and it goes nowhere: there is no equivalent of the counterparty memory for
+  accounts.
+- Proposed entries carry no VAT treatment. A gross bank charge is booked gross,
+  which is right for that charge and wrong for most purchases.
 - The dashboard embeds every posting in the file. At a year of a busy account
   that is a large page to open.
 - The CLI reads a whole ledger into memory on every invocation. Fine for a
