@@ -274,6 +274,33 @@ describe("reconcile", () => {
     expect(result.stderr).toContain("No account 9999");
   });
 
+  /**
+   * A grouping account has no postings of its own, so reconciling against it
+   * used to "succeed" with nothing matched and a bridge out by the entire
+   * statement. Refusing it is the whole fix: a wrong answer that looks like an
+   * answer is worse than an error.
+   */
+  it("refuses an account that groups others rather than reconciling it to nothing", () => {
+    const result = cli("reconcile", "-l", "month.json", "-s", "bank.csv", "-a", "1100");
+    expect(result.code).toBe(1);
+    expect(result.stderr).toContain("cannot be posted to");
+  });
+
+  it("names the children worth reconciling instead", () => {
+    const result = cli("reconcile", "-l", "month.json", "-s", "bank.csv", "-a", "1100");
+    expect(result.stderr).toContain("1110");
+  });
+
+  it("refuses the same account from the dashboard command", () => {
+    const result = cli("dashboard", "-l", "month.json", "-s", "bank.csv", "-a", "1100", "-o", "x.html");
+    expect(result.code).toBe(1);
+    expect(result.stderr).toContain("cannot be posted to");
+  });
+
+  it("still reconciles the postable account underneath it", () => {
+    expect(cli("reconcile", "-l", "month.json", "-s", "bank.csv", "-a", "1110").code).toBe(0);
+  });
+
   it("emits JSON with the bridge and the review queue's reasoning", () => {
     const result = cli("reconcile", "-l", "month.json", "-s", "bank.csv", "--json");
     const parsed = JSON.parse(result.stdout) as {
