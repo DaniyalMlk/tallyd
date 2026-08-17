@@ -32,12 +32,8 @@ import {
   statementClosingBalance,
 } from "../reconcile/bridge.js";
 import { measureAccuracy } from "../reconcile/accuracy.js";
-import {
-  MatchMemory,
-  MemoryDocumentError,
-  renderMemory,
-  type Decision,
-} from "../reconcile/memory.js";
+import { MatchMemory, MemoryDocumentError, renderMemory } from "../reconcile/memory.js";
+import { DecisionDocumentError, decisionsFor } from "../reconcile/decisions.js";
 import {
   generateBooks,
   statementCsv,
@@ -233,10 +229,32 @@ function loadMemory(environment: CliEnvironment, path: string | undefined): Matc
   }
 }
 
+/**
+ * Resolve the account to reconcile against.
+ *
+ * A grouping account is refused rather than reconciled. It exists in the chart
+ * and nothing has ever been posted to it, so reconciling it "succeeds": no
+ * ledger movements, no matches, and a bridge that is out by the entire
+ * statement while reporting nothing wrong. That is the worst kind of wrong
+ * answer, because it looks like an answer.
+ */
 function bankAccountFor(ledger: Ledger, requested: string | undefined): string {
   if (requested !== undefined) {
-    if (ledger.chart !== undefined && !ledger.chart.has(requested)) {
-      throw new ArgumentError(`No account ${requested} in the chart`);
+    const chart = ledger.chart;
+    if (chart !== undefined) {
+      if (!chart.has(requested)) {
+        throw new ArgumentError(`No account ${requested} in the chart`);
+      }
+      if (!chart.isPostable(requested)) {
+        const account = chart.get(requested);
+        const children = chart.children(requested).map((child) => child.code);
+        const advice =
+          children.length > 0 ? `; reconcile one of ${children.join(", ")}` : "";
+        throw new ArgumentError(
+          `Account ${requested} (${account.name}) cannot be posted to, so there is nothing to ` +
+            `reconcile against it${advice}`,
+        );
+      }
     }
     return requested;
   }
@@ -813,7 +831,7 @@ function learnCommand(environment: CliEnvironment, argv: readonly string[]): Cli
     return { stdout: "", stderr: "This environment cannot write files.\n", code: 1 };
   }
 
-  const decisions = parseDecisions(environment.readFile(requiredFlag(parsed, "decisions")));
+  const decisions = readDecisions(environment, requiredFlag(parsed, "decisions"));
   const updated = existing.learnAll(decisions);
   environment.writeFile(memoryPath, updated.toJson());
 
@@ -840,40 +858,21 @@ function learnCommand(environment: CliEnvironment, argv: readonly string[]): Cli
   };
 }
 
-function parseDecisions(text: string): readonly Decision[] {
-  let parsed: unknown;
+/**
+ * Read a decisions file, in the same format the dashboard writes.
+ *
+ * The format lives in `reconcile/decisions.ts` so that "what the review UI
+ * emits" and "what this command accepts" cannot drift apart. Its errors are
+ * re-thrown as usage errors because from the command line that is what they
+ * are: a file the caller handed over that could not be read.
+ */
+function readDecisions(environment: CliEnvironment, path: string) {
   try {
-    parsed = JSON.parse(text);
+    return decisionsFor(environment.readFile(path));
   } catch (error) {
-    throw new ArgumentError(
-      `The decisions file is not valid JSON: ${error instanceof Error ? error.message : String(error)}`,
-    );
+    if (error instanceof DecisionDocumentError) throw new ArgumentError(error.message);
+    throw error;
   }
-  if (!Array.isArray(parsed)) throw new ArgumentError("The decisions file must be a JSON array");
-
-  return parsed.map((value, index) => {
-    const raw = value as {
-      statement?: unknown;
-      book?: unknown;
-      accepted?: unknown;
-      on?: unknown;
-    };
-    if (typeof raw.statement !== "string" || typeof raw.book !== "string") {
-      throw new ArgumentError(`Decision ${index} needs a statement and a book description`);
-    }
-    if (typeof raw.accepted !== "boolean") {
-      throw new ArgumentError(`Decision ${index} needs accepted: true or false`);
-    }
-    if (typeof raw.on !== "string") {
-      throw new ArgumentError(`Decision ${index} needs the date it was decided`);
-    }
-    return {
-      statementDescription: raw.statement,
-      bookDescription: raw.book,
-      accepted: raw.accepted,
-      on: date(raw.on),
-    };
-  });
 }
 
 const HANDLERS: Record<string, (environment: CliEnvironment, argv: readonly string[]) => CliResult> = {
