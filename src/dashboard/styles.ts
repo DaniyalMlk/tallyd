@@ -671,7 +671,7 @@ details > div { padding-bottom: 16px; }
   font-weight: 550;
 }
 
-.implied-total .figure { font-family: var(--mono); }
+.implied-total .figure { font-family: var(--mono); white-space: nowrap; }
 
 @media (max-width: 700px) {
   .implied-row { grid-template-columns: minmax(0, 1fr) auto; row-gap: 2px; }
