@@ -590,7 +590,7 @@ details > div { padding-bottom: 16px; }
 
 .decided-row {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  grid-template-columns: auto auto minmax(0, 1fr) auto auto;
   align-items: center;
   gap: 14px;
   padding: 10px 2px;
@@ -619,6 +619,7 @@ details > div { padding-bottom: 16px; }
   white-space: nowrap;
 }
 
+.decided-row .when { font-family: var(--mono); font-size: 0.75rem; color: var(--ink-muted); }
 .decided-row .how-much { font-family: var(--mono); font-size: 0.75rem; }
 .decided-row .how-much.negative { color: var(--bad); }
 

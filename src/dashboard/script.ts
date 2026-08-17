@@ -429,7 +429,8 @@ export const CLIENT_SCRIPT = String.raw`
       verdict.setAttribute("data-verdict", entry.verdict);
       row.appendChild(verdict);
 
-      var bank = entry.match.statement[0];
+      var bank = entry.match.statement[0] || entry.match.book[0];
+      row.appendChild(element("span", "when", bank ? bank.date : ""));
       row.appendChild(element("span", "what", bank ? bank.description : "—"));
       row.appendChild(
         element(
