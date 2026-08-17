@@ -10,6 +10,20 @@
  * exact for integers well past any sum a small company's bank account will
  * reach, and the one thing this page must never do is show a reconciliation
  * that is out by a penny because a float rounded.
+ *
+ * ## What leaves the page
+ *
+ * Decisions are exported as the decisions document, which `tallyd learn` reads.
+ * The payload for each suggestion was built in TypeScript and baked into
+ * `window.__TALLYD__`; this script stamps a verdict and today's date onto it
+ * and serialises the result. Nothing here knows the shape of the format beyond
+ * those two fields, which is the point — a format definition living in a
+ * string of hand-written client JavaScript is a format definition nobody can
+ * test.
+ *
+ * A decision is reversible until it is exported. A queue card is hidden rather
+ * than destroyed when it is decided, so undo is a matter of putting it back
+ * where it was rather than rebuilding it from data.
  */
 
 export const CLIENT_SCRIPT = String.raw`
@@ -24,8 +38,21 @@ export const CLIENT_SCRIPT = String.raw`
     suggested: data.suggested.slice(),
     unmatchedBook: data.unmatchedBook.slice(),
     unmatchedStatement: data.unmatchedStatement.slice(),
-    decisions: {}
+    // Decided suggestions, oldest first. Undo pops from the end.
+    decided: []
   };
+
+  // Where each suggestion sat in the queue to begin with, so an undo puts it
+  // back among its neighbours rather than at the bottom.
+  var queueOrder = {};
+  for (var q = 0; q < data.suggested.length; q++) queueOrder[data.suggested[q].id] = q;
+
+  /** Today, in the reviewer's own calendar rather than UTC's. */
+  function today() {
+    var now = new Date();
+    function pad(n) { return (n < 10 ? "0" : "") + n; }
+    return now.getFullYear() + "-" + pad(now.getMonth() + 1) + "-" + pad(now.getDate());
+  }
 
   // ------------------------------------------------------------ formatting
 
@@ -216,7 +243,7 @@ export const CLIENT_SCRIPT = String.raw`
     if (!found) return;
 
     state.suggested.splice(found.index, 1);
-    state.decisions[id] = verdict;
+    state.decided.push({ id: id, verdict: verdict, match: found.match });
 
     if (verdict === "accepted") {
       state.matched = state.matched.concat([found.match]);
@@ -229,18 +256,208 @@ export const CLIENT_SCRIPT = String.raw`
       announce("Match rejected. Both lines returned to the leftovers.");
     }
 
-    var card = document.querySelector('[data-match-id="' + id + '"]');
+    var card = queueCard(id);
     if (card) {
       card.setAttribute("data-leaving", "true");
       window.setTimeout(function () {
-        if (card.parentNode) card.parentNode.removeChild(card);
+        if (card.getAttribute("data-leaving") === "true") card.hidden = true;
         renderQueueEmptyState();
       }, 200);
     }
 
+    refresh();
+  }
+
+  /** Put a decision back, card and all, as if it had never been made. */
+  function undo(id) {
+    var index = -1;
+    for (var i = 0; i < state.decided.length; i++) {
+      if (state.decided[i].id === id) { index = i; break; }
+    }
+    if (index === -1) return;
+
+    var entry = state.decided.splice(index, 1)[0];
+    var match = entry.match;
+
+    if (entry.verdict === "accepted") {
+      state.matched = state.matched.filter(function (m) { return m.id !== id; });
+    } else {
+      state.unmatchedBook = withoutLines(state.unmatchedBook, match.book);
+      state.unmatchedStatement = withoutLines(state.unmatchedStatement, match.statement);
+    }
+
+    // Back among its neighbours: before the first suggestion that started
+    // life after it did.
+    var at = state.suggested.length;
+    for (var j = 0; j < state.suggested.length; j++) {
+      if (queueOrder[state.suggested[j].id] > queueOrder[id]) { at = j; break; }
+    }
+    state.suggested.splice(at, 0, match);
+
+    var card = queueCard(id);
+    if (card) {
+      card.hidden = false;
+      card.removeAttribute("data-leaving");
+    }
+    var placeholder = document.querySelector("#queue .empty");
+    if (placeholder && placeholder.parentNode) placeholder.parentNode.removeChild(placeholder);
+
+    announce("Decision undone. " + state.suggested.length + " to review.");
+    refresh();
+  }
+
+  function withoutLines(lines, remove) {
+    var ids = {};
+    for (var i = 0; i < remove.length; i++) ids[remove[i].id] = true;
+    return lines.filter(function (line) { return !ids[line.id]; });
+  }
+
+  function queueCard(id) {
+    return document.querySelector('#queue [data-match-id="' + id + '"]');
+  }
+
+  // ------------------------------------------------------------- decisions
+
+  /**
+   * The decisions document, in the format "tallyd learn" reads.
+   *
+   * Every payload the server computed for a decided suggestion, with the
+   * verdict and the date stamped on. A group match contributes several
+   * records from one click; that expansion happened in TypeScript.
+   */
+  function decisionsDocument() {
+    var on = today();
+    var records = [];
+    for (var i = 0; i < state.decided.length; i++) {
+      var entry = state.decided[i];
+      var payloads = entry.match.decision || [];
+      for (var j = 0; j < payloads.length; j++) {
+        records.push({
+          statement: payloads[j].statement,
+          book: payloads[j].book,
+          accepted: entry.verdict === "accepted",
+          on: on,
+          context: payloads[j].context
+        });
+      }
+    }
+    return records;
+  }
+
+  function decisionsJson() {
+    return JSON.stringify(decisionsDocument(), null, 2) + "\n";
+  }
+
+  function exportDecisions() {
+    var text = decisionsJson();
+    var blob = new Blob([text], { type: "application/json" });
+    var url = URL.createObjectURL(blob);
+    var link = document.createElement("a");
+    link.href = url;
+    link.download = "decisions-" + data.account + "-" + today() + ".json";
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    window.setTimeout(function () { URL.revokeObjectURL(url); }, 0);
+    announce("Decisions file written.");
+  }
+
+  /**
+   * Copy, for the browser that will not download from a file:// document.
+   * The clipboard API needs a secure context and this page is often opened
+   * off a disk, so the textarea route is the one that actually runs.
+   */
+  function copyDecisions(button) {
+    var text = decisionsJson();
+    var done = function (ok) {
+      var label = button.textContent;
+      button.textContent = ok ? "Copied" : "Press ⌘C";
+      window.setTimeout(function () { button.textContent = label; }, 1400);
+      announce(ok ? "Decisions copied to the clipboard." : "Select the text and copy it.");
+    };
+
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(function () { done(true); }, function () { legacyCopy(text, done); });
+      return;
+    }
+    legacyCopy(text, done);
+  }
+
+  function legacyCopy(text, done) {
+    var area = document.createElement("textarea");
+    area.value = text;
+    area.setAttribute("readonly", "readonly");
+    area.style.position = "fixed";
+    area.style.top = "-1000px";
+    document.body.appendChild(area);
+    area.select();
+    var ok = false;
+    try { ok = document.execCommand("copy"); } catch (error) { ok = false; }
+    document.body.removeChild(area);
+    done(ok);
+  }
+
+  function renderDecided() {
+    var section = document.getElementById("decided-section");
+    var host = document.getElementById("decided-list");
+    var bar = document.getElementById("decision-bar");
+    var tally = document.getElementById("decision-tally");
+    if (!section || !host || !bar || !tally) return;
+
+    var count = state.decided.length;
+    section.hidden = count === 0;
+    bar.setAttribute("data-open", count === 0 ? "false" : "true");
+
+    var facts = decisionsDocument().length;
+    tally.innerHTML = "";
+    tally.appendChild(element("strong", null, String(count)));
+    tally.appendChild(
+      document.createTextNode(
+        (count === 1 ? " decision" : " decisions") +
+          ", " + facts + (facts === 1 ? " counterparty fact" : " counterparty facts") +
+          " to export"
+      )
+    );
+
+    host.textContent = "";
+    // Newest first: the thing most likely to be undone is the thing just done.
+    for (var i = state.decided.length - 1; i >= 0; i--) {
+      var entry = state.decided[i];
+      var row = element("div", "decided-row");
+
+      var verdict = element("span", "verdict", entry.verdict);
+      verdict.setAttribute("data-verdict", entry.verdict);
+      row.appendChild(verdict);
+
+      var bank = entry.match.statement[0] || entry.match.book[0];
+      row.appendChild(element("span", "when", bank ? bank.date : ""));
+      row.appendChild(element("span", "what", bank ? bank.description : "—"));
+      row.appendChild(
+        element(
+          "span",
+          "how-much" + (entry.match.amount.minor < 0 ? " negative" : ""),
+          entry.match.amount.text
+        )
+      );
+
+      var button = element("button", null, "Undo");
+      button.setAttribute("type", "button");
+      button.setAttribute("data-action", "undo");
+      button.setAttribute("data-match-id", entry.id);
+      row.appendChild(button);
+
+      host.appendChild(row);
+    }
+
+    var undoLast = document.querySelector('[data-action="undo-last"]');
+    if (undoLast) undoLast.disabled = count === 0;
+  }
+
+  function refresh() {
     renderCounts();
     renderBridge();
     renderLeftovers();
+    renderDecided();
   }
 
   function byDate(a, b) {
@@ -269,6 +486,12 @@ export const CLIENT_SCRIPT = String.raw`
     var id = button.getAttribute("data-match-id");
     if (action === "accept") decide(id, "accepted");
     if (action === "reject") decide(id, "rejected");
+    if (action === "undo") undo(id);
+    if (action === "undo-last" && state.decided.length > 0) {
+      undo(state.decided[state.decided.length - 1].id);
+    }
+    if (action === "export-decisions") exportDecisions();
+    if (action === "copy-decisions") copyDecisions(button);
   });
 
   // ------------------------------------------------------- ledger explorer
@@ -386,10 +609,11 @@ export const CLIENT_SCRIPT = String.raw`
 
   // ------------------------------------------------------------------ boot
 
-  renderCounts();
-  renderBridge();
-  renderLeftovers();
+  refresh();
   renderPostings();
   renderQueueEmptyState();
+
+  // A test harness, and the only supported way in: the page owns its state.
+  window.__TALLYD_DECISIONS__ = decisionsDocument;
 })();
 `;

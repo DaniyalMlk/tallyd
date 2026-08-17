@@ -23,6 +23,7 @@ import type { StatementLine } from "../statement/line.js";
 import type { BookLine } from "../reconcile/bankView.js";
 import type { Match, ReconciliationResult } from "../reconcile/matcher.js";
 import { significantReasons } from "../reconcile/matcher.js";
+import { decisionPayloads, type DecisionPayload } from "../reconcile/decisions.js";
 import { trialBalance } from "../ledger/trialBalance.js";
 
 export interface AmountView {
@@ -51,6 +52,12 @@ export interface MatchView {
   readonly statement: readonly LineView[];
   readonly reasons: readonly string[];
   readonly amount: AmountView;
+  /**
+   * What deciding this suggestion should write to the decisions file, minus
+   * the verdict and the date. Built here rather than in the browser so the
+   * shape is type-checked and tested; see `reconcile/decisions.ts`.
+   */
+  readonly decision: readonly DecisionPayload[];
 }
 
 export interface AccountView {
@@ -134,6 +141,7 @@ function matchView(match: Match, index: number, bucket: string): MatchView {
   const minor = match.statement.reduce((sum, line) => sum + Number(line.amount.minorUnits), 0);
   const currency = match.statement[0]?.amount.currency ?? match.book[0]?.amount.currency;
   const exponent = currency?.exponent ?? 2;
+  const amount = { text: formatMinor(minor, exponent), minor };
   return {
     id: `${bucket}-${index}`,
     kind: match.kind,
@@ -142,7 +150,17 @@ function matchView(match: Match, index: number, bucket: string): MatchView {
     book: match.book.map(bookLineView),
     statement: match.statement.map(statementLineView),
     reasons: significantReasons(match),
-    amount: { text: formatMinor(minor, exponent), minor },
+    amount,
+    decision: decisionPayloads({
+      statementDescriptions: match.statement.map((line) => line.description),
+      bookDescriptions: match.book.map((line) => line.description),
+      context: {
+        amount: amount.text,
+        date: match.statement[0]?.date ?? match.book[0]?.date ?? "",
+        kind: match.kind,
+        confidence: match.scored.confidence,
+      },
+    }),
   };
 }
 

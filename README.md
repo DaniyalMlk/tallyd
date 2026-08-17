@@ -171,6 +171,37 @@ confirmed yet. The ledger explorer lists every account that has been posted to,
 with grouping accounts rolled up, and drills into the postings behind any of
 them.
 
+### Getting the decisions back out
+
+Working through a queue produces the only new information in the whole cycle: a
+person asserting which counterparties are the same counterparty. The page hands
+that back as a decisions file, in the format `tallyd learn` reads.
+
+```bash
+tallyd dashboard -l books.json -s statement.csv -a 1110 -o review.html
+# work the queue, press Export decisions, then:
+tallyd learn -m memory.json -d ~/Downloads/decisions-1110-2026-04-30.json
+```
+
+A decision is reversible until it is exported — the bar along the bottom counts
+what is pending and undoes the last one, and the *Decided* section undoes any of
+them. Nothing is written anywhere until you ask for the file.
+
+The design decision that mattered here is where the format lives. The payload
+for each suggestion — which two descriptions are being paired, and the amount,
+date, kind and confidence that ride along as context — is computed in
+TypeScript and baked into the page. The browser stamps a verdict and today's
+date onto it and serialises the result. That is the whole of the client's
+involvement with the format, so what can go wrong in the browser is a boolean
+and a date rather than a schema. A format definition living in a string of
+hand-written client JavaScript is a format definition nobody can test.
+
+Group matches expand: accepting `BACS SUPPLIER RUN 724262` against three
+supplier payments is one click but three facts, because next month the same
+batch arrives with a different reference and the same three names in it. The
+expansion is the cross product of the descriptions on each side, deduplicated,
+and bounded at sixteen by the matcher's own four-a-side group cap.
+
 ## Generated books, and performance
 
 Everything above was developed against a hand-written month: a dozen statement

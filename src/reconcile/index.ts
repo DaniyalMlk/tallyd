@@ -101,3 +101,17 @@ export {
   counterpartyKey,
   renderMemory,
 } from "./memory.js";
+
+export {
+  type DecisionRecord,
+  type DecisionContext,
+  type DecisionPayload,
+  DecisionDocumentError,
+  decisionPayloads,
+  decisionRecord,
+  toDecision,
+  parseDecisions,
+  decisionsFromDocument,
+  serialiseDecisions,
+  decisionsFor,
+} from "./decisions.js";

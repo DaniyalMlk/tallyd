@@ -524,6 +524,107 @@ details > div { padding-bottom: 16px; }
   .chart .bar-label { font-size: 17px; }
 }
 
+/* --------------------------------------------------------------- decisions */
+
+/*
+ * The one authored moment on the page. The bar is out of the way until the
+ * first decision exists, then it arrives from below — the direction it will
+ * leave in — and stays put for the rest of the session. Everything else here
+ * moves only in response to a click.
+ */
+.decision-bar {
+  position: fixed;
+  left: 50%;
+  bottom: 20px;
+  z-index: 20;
+  width: min(760px, calc(100vw - 32px));
+  translate: -50% 0;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 12px 14px 12px 18px;
+  background: var(--surface);
+  border: 1px solid var(--rule-strong);
+  border-radius: 14px;
+  box-shadow: 0 1px 2px rgba(23, 22, 19, 0.06), 0 12px 32px -12px rgba(23, 22, 19, 0.28);
+  transition: opacity 260ms var(--ease), transform 260ms var(--ease),
+    visibility 0s linear 260ms;
+  opacity: 0;
+  transform: translateY(14px);
+  visibility: hidden;
+}
+
+.decision-bar[data-open="true"] {
+  opacity: 1;
+  transform: translateY(0);
+  visibility: visible;
+  transition-delay: 0s;
+}
+
+.decision-bar .tally-text {
+  font-size: 0.8125rem;
+  color: var(--ink-secondary);
+  min-width: 0;
+}
+
+.decision-bar .tally-text strong {
+  color: var(--ink);
+  font-weight: 560;
+  font-variant-numeric: tabular-nums;
+}
+
+.decision-bar .bar-actions {
+  margin-left: auto;
+  display: flex;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+@media (max-width: 620px) {
+  .decision-bar { flex-wrap: wrap; }
+  .decision-bar .bar-actions { margin-left: 0; width: 100%; }
+  .decision-bar .bar-actions button { flex: 1; }
+}
+
+.decided-list { display: flex; flex-direction: column; }
+
+.decided-row {
+  display: grid;
+  grid-template-columns: auto auto minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 14px;
+  padding: 10px 2px;
+  border-bottom: 1px solid var(--rule);
+  font-size: 0.8125rem;
+}
+
+.decided-row:last-child { border-bottom: 0; }
+
+.decided-row .verdict {
+  font-size: 0.6875rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  font-weight: 560;
+  padding: 2px 8px;
+  border-radius: 999px;
+}
+
+.decided-row .verdict[data-verdict="accepted"] { background: var(--good-soft); color: var(--good); }
+.decided-row .verdict[data-verdict="rejected"] { background: var(--bad-soft); color: var(--bad); }
+
+.decided-row .what {
+  color: var(--ink-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.decided-row .when { font-family: var(--mono); font-size: 0.75rem; color: var(--ink-muted); }
+.decided-row .how-much { font-family: var(--mono); font-size: 0.75rem; }
+.decided-row .how-much.negative { color: var(--bad); }
+
+.decided-row button { padding: 3px 10px; font-size: 0.75rem; }
+
 /* ------------------------------------------------------------------- empty */
 
 .empty {
