@@ -170,6 +170,8 @@ const COMMANDS: Record<string, { describe: string; flags: FlagSpecs }> = {
       "date-window": { kind: "string", describe: "Days either side a pair may differ", placeholder: "days" },
       "no-groups": { kind: "boolean", describe: "Disable one-to-many matching" },
       memory: { kind: "string", short: "m", describe: "Confirmed counterparties (JSON)", placeholder: "file" },
+      rules: { kind: "string", short: "r", describe: "Classification rules for the implied entries (JSON)", placeholder: "file" },
+      suspense: { kind: "string", describe: "Existing account for lines no rule matched", placeholder: "code" },
     },
   },
   post: {
@@ -645,6 +647,18 @@ function dashboardCommand(environment: CliEnvironment, argv: readonly string[]):
   const run = reconciliationFor(environment, parsed);
   const { ledger, account, imported, books, result, bankClosingBalance, bookClosingBalance } = run;
 
+  // Every statement line gets a proposal, not only the ones currently
+  // unmatched: the page decides which are live from its own leftovers, so a
+  // rejection has to have something to show the moment it is made.
+  const implied = proposeEntries(imported.lines, {
+    account,
+    rules: rulesFor(environment, parsed),
+    ledger,
+    ...(stringFlag(parsed, "suspense") === undefined
+      ? {}
+      : { suspenseAccount: stringFlag(parsed, "suspense") as string }),
+  });
+
   const html = renderDashboard(
     dashboardData({
       ledger,
@@ -655,6 +669,7 @@ function dashboardCommand(environment: CliEnvironment, argv: readonly string[]):
       bankClosingBalance,
       bookClosingBalance,
       statementFormat: imported.format,
+      implied,
     }),
   );
 
@@ -930,16 +945,7 @@ function postCommand(environment: CliEnvironment, argv: readonly string[]): CliR
   const { ledger, account, currencyCode, result, memory } = run;
   const needing = linesNeedingEntries(result, memory);
 
-  const rulesPath = stringFlag(parsed, "rules");
-  let rules = standardRules();
-  if (rulesPath !== undefined) {
-    try {
-      rules = parseRules(environment.readFile(rulesPath));
-    } catch (error) {
-      if (error instanceof PostingRuleError) throw new ArgumentError(error.message);
-      throw error;
-    }
-  }
+  const rules = rulesFor(environment, parsed);
 
   const suspense = stringFlag(parsed, "suspense");
   if (suspense !== undefined && ledger.chart?.isPostable(suspense) === false) {
@@ -1039,6 +1045,22 @@ function postCommand(environment: CliEnvironment, argv: readonly string[]): CliR
         : "",
     code,
   };
+}
+
+/**
+ * The classification rules for a run: the built-in set, or a file if one was
+ * named. Shared by `post` and by the dashboard's implied entries, so the two
+ * cannot disagree about what a line means.
+ */
+function rulesFor(environment: CliEnvironment, parsed: ParsedArgs) {
+  const path = stringFlag(parsed, "rules");
+  if (path === undefined) return standardRules();
+  try {
+    return parseRules(environment.readFile(path));
+  } catch (error) {
+    if (error instanceof PostingRuleError) throw new ArgumentError(error.message);
+    throw error;
+  }
 }
 
 /**

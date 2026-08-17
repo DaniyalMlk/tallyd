@@ -625,6 +625,60 @@ details > div { padding-bottom: 16px; }
 
 .decided-row button { padding: 3px 10px; font-size: 0.75rem; }
 
+/* ----------------------------------------------------------------- implied */
+
+.implied-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto minmax(0, 22ch);
+  align-items: baseline;
+  gap: 14px;
+  padding: 9px 2px;
+  border-bottom: 1px solid var(--rule);
+  font-size: 0.8125rem;
+}
+
+.implied-row:last-child { border-bottom: 0; }
+.implied-row .when { font-family: var(--mono); font-size: 0.75rem; color: var(--ink-muted); }
+.implied-row .what { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.implied-row .how-much { font-family: var(--mono); font-size: 0.75rem; }
+.implied-row .how-much.negative { color: var(--bad); }
+
+.implied-row .lands {
+  font-size: 0.75rem;
+  color: var(--ink-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.implied-row .lands code {
+  font-family: var(--mono);
+  font-size: 0.6875rem;
+  color: var(--ink);
+}
+
+.implied-row[data-outcome="unclassified"] .lands { color: var(--warn); }
+.implied-row[data-outcome="skip"] .lands { color: var(--ink-muted); }
+
+.implied-total {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--rule-strong);
+  font-size: 0.8125rem;
+  font-weight: 550;
+}
+
+.implied-total .figure { font-family: var(--mono); }
+
+@media (max-width: 700px) {
+  .implied-row { grid-template-columns: minmax(0, 1fr) auto; row-gap: 2px; }
+  .implied-row .when { grid-column: 1 / -1; }
+  .implied-row .lands { grid-column: 1 / -1; }
+}
+
 /* ------------------------------------------------------------------- empty */
 
 .empty {
