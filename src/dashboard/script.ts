@@ -453,11 +453,97 @@ export const CLIENT_SCRIPT = String.raw`
     if (undoLast) undoLast.disabled = count === 0;
   }
 
+  // --------------------------------------------------------------- implied
+
+  var impliedByLine = {};
+  for (var e = 0; e < (data.implied || []).length; e++) {
+    impliedByLine[data.implied[e].lineId] = data.implied[e];
+  }
+
+  /**
+   * The entries the current state of the review implies.
+   *
+   * Every statement line has a proposal precomputed; which ones are live
+   * follows from the leftovers, so rejecting a suggestion adds a row here in
+   * the same gesture that pushes its lines back into the leftovers.
+   */
+  function renderImplied() {
+    var section = document.getElementById("implied-section");
+    var host = document.getElementById("implied");
+    if (!section || !host) return;
+
+    var rows = [];
+    for (var i = 0; i < state.unmatchedStatement.length; i++) {
+      var proposal = impliedByLine[state.unmatchedStatement[i].id];
+      if (proposal) rows.push(proposal);
+    }
+    rows.sort(function (a, b) { return a.date < b.date ? -1 : a.date > b.date ? 1 : 0; });
+
+    host.textContent = "";
+
+    if (rows.length === 0) {
+      var empty = element("div", "empty");
+      empty.appendChild(element("strong", null, "Nothing to book"));
+      empty.appendChild(
+        document.createTextNode("Every statement line has a counterpart in the books.")
+      );
+      host.appendChild(empty);
+      return;
+    }
+
+    var booked = 0;
+    var total = 0;
+
+    for (var j = 0; j < rows.length; j++) {
+      var row = rows[j];
+      var node = element("div", "implied-row");
+      node.setAttribute("data-outcome", row.outcome);
+
+      node.appendChild(element("span", "when", row.date));
+      node.appendChild(element("span", "what", row.description));
+      node.appendChild(
+        element("span", "how-much" + (row.amount.minor < 0 ? " negative" : ""), row.amount.text)
+      );
+
+      var lands = element("span", "lands");
+      if (row.outcome === "book" && row.account) {
+        var code = element("code", null, row.account);
+        lands.appendChild(code);
+        lands.appendChild(document.createTextNode(" " + (row.accountName || "")));
+        booked += 1;
+        total += row.amount.minor;
+      } else if (row.outcome === "skip") {
+        lands.textContent = "not a transaction";
+      } else if (row.outcome === "already-booked") {
+        lands.textContent = "already booked";
+      } else {
+        lands.textContent = "no rule";
+      }
+      lands.title = row.reason;
+      node.appendChild(lands);
+
+      host.appendChild(node);
+    }
+
+    var summary = element("div", "implied-total");
+    summary.appendChild(
+      element(
+        "span",
+        null,
+        booked + (booked === 1 ? " entry to book" : " entries to book") +
+          ", " + (rows.length - booked) + " left for a person"
+      )
+    );
+    summary.appendChild(element("span", "figure", money(total)));
+    host.appendChild(summary);
+  }
+
   function refresh() {
     renderCounts();
     renderBridge();
     renderLeftovers();
     renderDecided();
+    renderImplied();
   }
 
   function byDate(a, b) {

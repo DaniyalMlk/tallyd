@@ -42,6 +42,19 @@ import {
 import { dashboardData } from "../dashboard/model.js";
 import { renderDashboard } from "../dashboard/render.js";
 import {
+  applyProposals,
+  parseRules,
+  PostingRuleError,
+  proposeEntries,
+  renderProposals,
+  linesNeedingEntries,
+  standardRules,
+  summariseProposals,
+  type ProposalOptions,
+} from "../reconcile/posting.js";
+import type { BookLine } from "../reconcile/bankView.js";
+import type { ReconciliationResult } from "../reconcile/matcher.js";
+import {
   ArgumentError,
   booleanFlag,
   parseArgs,
@@ -49,6 +62,7 @@ import {
   requiredFlag,
   stringFlag,
   type FlagSpecs,
+  type ParsedArgs,
 } from "./args.js";
 
 export interface CliEnvironment {
@@ -156,6 +170,26 @@ const COMMANDS: Record<string, { describe: string; flags: FlagSpecs }> = {
       "date-window": { kind: "string", describe: "Days either side a pair may differ", placeholder: "days" },
       "no-groups": { kind: "boolean", describe: "Disable one-to-many matching" },
       memory: { kind: "string", short: "m", describe: "Confirmed counterparties (JSON)", placeholder: "file" },
+      rules: { kind: "string", short: "r", describe: "Classification rules for the implied entries (JSON)", placeholder: "file" },
+      suspense: { kind: "string", describe: "Existing account for lines no rule matched", placeholder: "code" },
+    },
+  },
+  post: {
+    describe: "Propose the journal entries a reconciled statement implies",
+    flags: {
+      ledger: { kind: "string", short: "l", describe: "Ledger document (JSON)", placeholder: "file" },
+      statement: { kind: "string", short: "s", describe: "Bank statement (CSV or OFX)", placeholder: "file" },
+      account: { kind: "string", short: "a", describe: "Bank account code", placeholder: "code" },
+      decisions: { kind: "string", short: "d", describe: "Reviewed decisions from the dashboard (JSON)", placeholder: "file" },
+      rules: { kind: "string", short: "r", describe: "Classification rules (JSON); the built-in set is used otherwise", placeholder: "file" },
+      suspense: { kind: "string", describe: "Existing account for lines no rule matched", placeholder: "code" },
+      out: { kind: "string", short: "o", describe: "Write the ledger with the entries applied", placeholder: "file" },
+      currency: { kind: "string", describe: "Statement currency (default: the chart's)", placeholder: "code" },
+      "date-window": { kind: "string", describe: "Days either side a pair may differ", placeholder: "days" },
+      "no-groups": { kind: "boolean", describe: "Disable one-to-many matching" },
+      memory: { kind: "string", short: "m", describe: "Confirmed counterparties (JSON)", placeholder: "file" },
+      strict: { kind: "boolean", describe: "Exit 2 when any line could not be classified" },
+      json: { kind: "boolean", describe: "Emit JSON instead of text" },
     },
   },
   learn: {
@@ -381,8 +415,33 @@ function ageingCommand(environment: CliEnvironment, argv: readonly string[]): Cl
   return { stdout: renderAgeing(report), stderr: "", code: 0 };
 }
 
-function reconcileCommand(environment: CliEnvironment, argv: readonly string[]): CliResult {
-  const parsed = parseArgs(argv, (COMMANDS["reconcile"] as { flags: FlagSpecs }).flags);
+/**
+ * Everything three commands need: the ledger, the statement, and the match
+ * between them.
+ *
+ * `reconcile`, `dashboard` and `post` all start the same way — load, import,
+ * project the account into bank direction, match — and differ only in what
+ * they do with the answer. Written once, so a flag added to one is a flag the
+ * others honour rather than a flag the others silently ignore.
+ */
+interface ReconciliationRun {
+  readonly ledger: Ledger;
+  readonly account: string;
+  readonly currencyCode: string;
+  readonly imported: ReturnType<typeof importStatement>;
+  readonly books: readonly BookLine[];
+  readonly result: ReconciliationResult;
+  readonly bankClosingBalance: Money;
+  readonly bookClosingBalance: Money;
+  /** What the matcher was told to remember, decisions folded in. */
+  readonly memory: MatchMemory;
+}
+
+function reconciliationFor(
+  environment: CliEnvironment,
+  parsed: ParsedArgs,
+  extraDecisions: readonly { statementDescription: string; bookDescription: string; accepted: boolean; on: CalendarDate }[] = [],
+): ReconciliationRun {
   const ledger = loadLedger(environment, requiredFlag(parsed, "ledger"));
   const account = bankAccountFor(ledger, stringFlag(parsed, "account"));
   const raw = environment.readFile(requiredFlag(parsed, "statement"));
@@ -394,8 +453,8 @@ function reconcileCommand(environment: CliEnvironment, argv: readonly string[]):
     "GBP";
   const imported = importStatement(raw, { currency: lookupCurrency(currencyCode), idPrefix: "BANK" });
 
-  const windowText = stringFlag(parsed, "date-window");
   const options: Parameters<typeof reconcile>[2] = {};
+  const windowText = stringFlag(parsed, "date-window");
   if (windowText !== undefined) {
     const days = Number(windowText);
     if (!Number.isInteger(days) || days < 0) {
@@ -404,19 +463,37 @@ function reconcileCommand(environment: CliEnvironment, argv: readonly string[]):
     options.dateWindowDays = days;
   }
   if (booleanFlag(parsed, "no-groups")) options.groupMatching = false;
-  const memory = loadMemory(environment, stringFlag(parsed, "memory"));
+
+  const memory = loadMemory(environment, stringFlag(parsed, "memory")).learnAll(extraDecisions);
   if (memory.size > 0) options.memory = memory;
 
   const books = bankView(ledger, account, { currency: currencyCode });
   const result = reconcile(books, imported.lines, options);
 
-  const bookBalance = books.reduce(
-    (total, line) => total.plus(line.amount),
-    Money.zero(currencyCode),
-  );
-  const bridge = reconciliationBridge(result, {
+  return {
+    ledger,
+    account,
+    currencyCode,
+    imported,
+    books,
+    result,
+    memory,
     bankClosingBalance: statementClosingBalance(imported.lines, Money.zero(currencyCode)),
-    bookClosingBalance: bookBalance,
+    bookClosingBalance: books.reduce(
+      (total, line) => total.plus(line.amount),
+      Money.zero(currencyCode),
+    ),
+  };
+}
+
+function reconcileCommand(environment: CliEnvironment, argv: readonly string[]): CliResult {
+  const parsed = parseArgs(argv, (COMMANDS["reconcile"] as { flags: FlagSpecs }).flags);
+  const run = reconciliationFor(environment, parsed);
+  const { account, imported, result, memory } = run;
+
+  const bridge = reconciliationBridge(result, {
+    bankClosingBalance: run.bankClosingBalance,
+    bookClosingBalance: run.bookClosingBalance,
   });
 
   if (booleanFlag(parsed, "json")) {
@@ -567,37 +644,20 @@ function dashboardCommand(environment: CliEnvironment, argv: readonly string[]):
     throw new ArgumentError("This environment cannot write files");
   }
 
-  const ledger = loadLedger(environment, requiredFlag(parsed, "ledger"));
-  const account = bankAccountFor(ledger, stringFlag(parsed, "account"));
-  const raw = environment.readFile(requiredFlag(parsed, "statement"));
+  const run = reconciliationFor(environment, parsed);
+  const { ledger, account, imported, books, result, bankClosingBalance, bookClosingBalance } = run;
 
-  const currencyCode =
-    stringFlag(parsed, "currency") ??
-    ledger.chart?.find(account)?.currency.code ??
-    ledger.currenciesUsed()[0] ??
-    "GBP";
-  const imported = importStatement(raw, { currency: lookupCurrency(currencyCode), idPrefix: "BANK" });
-
-  const options: Parameters<typeof reconcile>[2] = {};
-  const windowText = stringFlag(parsed, "date-window");
-  if (windowText !== undefined) {
-    const days = Number(windowText);
-    if (!Number.isInteger(days) || days < 0) {
-      throw new ArgumentError(`--date-window wants a whole number of days, got "${windowText}"`);
-    }
-    options.dateWindowDays = days;
-  }
-  if (booleanFlag(parsed, "no-groups")) options.groupMatching = false;
-  const memory = loadMemory(environment, stringFlag(parsed, "memory"));
-  if (memory.size > 0) options.memory = memory;
-
-  const books = bankView(ledger, account, { currency: currencyCode });
-  const result = reconcile(books, imported.lines, options);
-  const bookClosingBalance = books.reduce(
-    (total, line) => total.plus(line.amount),
-    Money.zero(currencyCode),
-  );
-  const bankClosingBalance = statementClosingBalance(imported.lines, Money.zero(currencyCode));
+  // Every statement line gets a proposal, not only the ones currently
+  // unmatched: the page decides which are live from its own leftovers, so a
+  // rejection has to have something to show the moment it is made.
+  const implied = proposeEntries(imported.lines, {
+    account,
+    rules: rulesFor(environment, parsed),
+    ledger,
+    ...(stringFlag(parsed, "suspense") === undefined
+      ? {}
+      : { suspenseAccount: stringFlag(parsed, "suspense") as string }),
+  });
 
   const html = renderDashboard(
     dashboardData({
@@ -609,6 +669,7 @@ function dashboardCommand(environment: CliEnvironment, argv: readonly string[]):
       bankClosingBalance,
       bookClosingBalance,
       statementFormat: imported.format,
+      implied,
     }),
   );
 
@@ -859,6 +920,150 @@ function learnCommand(environment: CliEnvironment, argv: readonly string[]): Cli
 }
 
 /**
+ * Book what the statement says happened and the books do not know about.
+ *
+ * Only lines the matcher left *entirely* unexplained are proposed. A line
+ * sitting in the review queue has a ledger counterpart the matcher believes
+ * in; booking an entry for it as well would double-count it. Undecided means
+ * unproposed, which is the conservative reading and the right one.
+ *
+ * Decisions reach this command through the memory rather than through match
+ * ids. The decisions file has no ids in it on purpose — an id only means
+ * something against the exact reconciliation that produced it — so a
+ * confirmation raises the pair's score until it matches outright, and a
+ * rejection pushes it down until the statement line falls out of the queue and
+ * becomes something to book. The mechanism was already there; this command
+ * just points it at the right question.
+ */
+function postCommand(environment: CliEnvironment, argv: readonly string[]): CliResult {
+  const parsed = parseArgs(argv, (COMMANDS["post"] as { flags: FlagSpecs }).flags);
+
+  const decisionsPath = stringFlag(parsed, "decisions");
+  const decisions = decisionsPath === undefined ? [] : readDecisions(environment, decisionsPath);
+
+  const run = reconciliationFor(environment, parsed, decisions);
+  const { ledger, account, currencyCode, result, memory } = run;
+  const needing = linesNeedingEntries(result, memory);
+
+  const rules = rulesFor(environment, parsed);
+
+  const suspense = stringFlag(parsed, "suspense");
+  if (suspense !== undefined && ledger.chart?.isPostable(suspense) === false) {
+    throw new ArgumentError(`The suspense account ${suspense} is not one this chart can post to`);
+  }
+
+  const options: ProposalOptions = {
+    account,
+    rules,
+    ledger,
+    ...(suspense === undefined ? {} : { suspenseAccount: suspense }),
+  };
+  let proposals;
+  try {
+    proposals = proposeEntries(needing, options);
+  } catch (error) {
+    if (error instanceof PostingRuleError) throw new ArgumentError(error.message);
+    throw error;
+  }
+  const summary = summariseProposals(proposals, currencyCode);
+
+  const out = stringFlag(parsed, "out");
+  let written: string | undefined;
+  if (out !== undefined) {
+    if (environment.writeFile === undefined) {
+      return { stdout: "", stderr: "This environment cannot write files.\n", code: 1 };
+    }
+    environment.writeFile(out, ledgerToJson(applyProposals(ledger, proposals)));
+    written = out;
+  }
+
+  const strict = booleanFlag(parsed, "strict");
+  const code = strict && summary.unclassified > 0 ? 2 : 0;
+
+  if (booleanFlag(parsed, "json")) {
+    return {
+      stdout: JSON.stringify(
+        {
+          account,
+          proposals: proposals.map((proposal) => ({
+            statementLine: proposal.line.id,
+            date: proposal.line.date,
+            description: proposal.line.description,
+            amount: proposal.line.amount.toDecimalString(),
+            outcome: proposal.outcome,
+            rule: proposal.rule?.id ?? null,
+            account: proposal.account,
+            entry: proposal.entry?.id ?? null,
+            reason: proposal.reason,
+          })),
+          summary: {
+            total: summary.total,
+            booked: summary.booked,
+            skipped: summary.skipped,
+            unclassified: summary.unclassified,
+            alreadyBooked: summary.alreadyBooked,
+            net: summary.net.toDecimalString(),
+            byAccount: summary.byAccount.map((total) => ({
+              account: total.account,
+              amount: total.amount.toDecimalString(),
+              count: total.count,
+            })),
+          },
+          ...(written === undefined ? {} : { wrote: written }),
+        },
+        null,
+        2,
+      ),
+      stderr: "",
+      code,
+    };
+  }
+
+  const lines = [
+    `${needing.length} statement ${needing.length === 1 ? "line has" : "lines have"} no counterpart in the books`,
+    "",
+    renderProposals(proposals, summary),
+  ];
+  if (suspense !== undefined) {
+    lines.push(
+      "",
+      `Everything unmatched went to ${suspense}. A line the matcher merely failed to`,
+      "match is not a line the books are missing, so check the queue before trusting this.",
+    );
+  }
+  if (written !== undefined) {
+    lines.push("", `Wrote ${written} with ${summary.booked} ${summary.booked === 1 ? "entry" : "entries"} applied.`);
+  } else if (summary.booked > 0) {
+    lines.push("", "Nothing was written. Pass --out to apply these.");
+  }
+
+  return {
+    stdout: lines.join("\n"),
+    stderr:
+      code === 2
+        ? `${summary.unclassified} line${summary.unclassified === 1 ? "" : "s"} could not be classified.\n`
+        : "",
+    code,
+  };
+}
+
+/**
+ * The classification rules for a run: the built-in set, or a file if one was
+ * named. Shared by `post` and by the dashboard's implied entries, so the two
+ * cannot disagree about what a line means.
+ */
+function rulesFor(environment: CliEnvironment, parsed: ParsedArgs) {
+  const path = stringFlag(parsed, "rules");
+  if (path === undefined) return standardRules();
+  try {
+    return parseRules(environment.readFile(path));
+  } catch (error) {
+    if (error instanceof PostingRuleError) throw new ArgumentError(error.message);
+    throw error;
+  }
+}
+
+/**
  * Read a decisions file, in the same format the dashboard writes.
  *
  * The format lives in `reconcile/decisions.ts` so that "what the review UI
@@ -885,6 +1090,7 @@ const HANDLERS: Record<string, (environment: CliEnvironment, argv: readonly stri
   bench: benchCommand,
   learn: learnCommand,
   dashboard: dashboardCommand,
+  post: postCommand,
 };
 
 /** Run one invocation. Never throws; every failure becomes an exit code. */

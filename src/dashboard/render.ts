@@ -200,6 +200,12 @@ export function renderDashboard(data: DashboardData): string {
     </div>
   </section>
 
+  <section id="implied-section">
+    <h2>What this implies</h2>
+    <p class="section-note">The entries these statement lines would need if nothing in the books explains them. Rejecting a suggestion adds one here; accepting it takes one away. Run <code>tallyd post</code> to book them.</p>
+    <div class="panel" id="implied"></div>
+  </section>
+
   <section>
     <h2>Cash position</h2>
     <p class="section-note">The balance of ${escapeHtml(data.account)} after every day it moved.</p>

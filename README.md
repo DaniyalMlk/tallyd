@@ -10,7 +10,7 @@ three invoices. That matching problem is what this project is actually about.
 
 ## Status
 
-Phases 1–8 are done; see [`ROADMAP.md`](./ROADMAP.md). The accounting core is
+Phases 1–9 are done; see [`ROADMAP.md`](./ROADMAP.md). The accounting core is
 complete and tested — money, the chart of accounts, journal entries, the ledger
 and the trial balance — and so is statement ingestion: CSV and OFX readers,
 format detection and duplicate flagging. The matching engine works end to end,
@@ -27,6 +27,10 @@ statement lines — went from 16.8 seconds to 0.2 with identical accuracy either
 side. And a matcher that no longer forgets: a counterparty a reviewer confirms
 once is recognised the next month, which on generated books moved recall from
 75.6% to 89.0% and cut the review queue by 69%.
+
+The cycle now closes at both ends. Decisions leave the review UI as a file the
+CLI already reads, and the statement lines nothing in the books explains come
+back as journal entries — classified, balanced, and impossible to post twice.
 
 ## Running it
 
@@ -57,6 +61,7 @@ tallyd generate  -o ./fixtures --months 12 --invoices 30 --truth
 tallyd bench     --sizes 1:10,6:15,12:30
 tallyd learn     -m memory.json -d decisions.json
 tallyd reconcile -l books.json -s statement.csv -m memory.json
+tallyd post      -l books.json -s statement.csv -d decisions.json -o after.json
 ```
 
 Every command takes `--json`. Exit codes carry meaning: `0` success, `1` a bad
@@ -362,6 +367,88 @@ With no memory supplied, scoring is exactly what it was before any of this
 existed — the rule contributes nothing and is not averaged in, the same
 treatment the reference rule gets when neither side carries one.
 
+## Booking what the statement says happened
+
+A reconciliation ends with statement lines the ledger has never heard of: the
+bank charge nobody entered, the interest, the direct debit set up two years
+ago, the card processor's cut. They are not matching failures — there is
+genuinely nothing to match them against — and the reconciliation will not
+balance until somebody books them. That somebody used to retype each one and
+guess the account, and the guess was recorded nowhere.
+
+```bash
+tallyd post -l books.json -s statement.csv -a 1110              # what would be booked
+tallyd post -l books.json -s statement.csv -a 1110 -o after.json  # and book it
+```
+
+```
+$ tallyd post -l books.json -s statement.csv -a 1110
+
+5 statement lines have no counterpart in the books
+
+date        description                 amount  account  rule
+2026-01-27  BACS SUPPLIER RUN 724262  -2053.00  —        unclassified
+2026-02-03  ACCOUNT MAINTENANCE FEE      -1.64  5800     bank-charges
+2026-02-26  BACS SUPPLIER RUN 178732  -4849.00  —        unclassified
+2026-03-11  ACCOUNT MAINTENANCE FEE      -1.84  5800     bank-charges
+2026-03-28  BACS SUPPLIER RUN 709648  -7151.00  —        unclassified
+
+2 to book, 0 skipped, 0 already in the ledger, 3 unclassified
+Net effect on the bank account: -3.48
+
+  5800         -3.48  (2 lines)
+```
+
+Three refusals shape this, and they are the interesting part.
+
+**It proposes; it does not post.** Every proposal carries the statement line it
+came from, the rule that classified it, and a balanced entry. `--out` is a
+separate thing to ask for.
+
+**It never invents an account.** A line no rule matches comes back
+unclassified — the three supplier runs above — rather than being swept into a
+suspense account the chart does not have. That is how a chart of accounts rots:
+the account appears, everything awkward goes in it, and nobody ever empties it.
+`--suspense 1120` names an existing account and takes responsibility for it;
+`--strict` turns anything left unclassified into exit code 2, which is what a
+pipeline wants.
+
+**Posting the same statement twice is a no-op.** Entry ids are derived from the
+statement line's fingerprint — date, amount, normalised description — so the
+same line always implies the same id, and an id already in the ledger is
+reported as already booked rather than posted again. Overlapping exports are
+the normal case, not an edge case. In practice the second run does not even get
+that far: the entries posted on the first run now *match* those lines, so they
+never reach the proposal stage.
+
+Classification is an ordered rule list, and the order is load-bearing.
+`INTEREST` outbound is a cost of borrowing and `INTEREST` inbound is income, so
+direction is part of the test, not an afterthought. Opening balance lines are
+skipped before anything can read them as a receipt — the bank telling you where
+it thinks you started is not a transaction. The rules are plain JSON and
+`--rules` replaces them wholesale, because a chart that is not this chart needs
+its own.
+
+### What the reviewer's decisions have to do with it
+
+Only lines with *no* suggestion are proposed. A line sitting in the review queue
+has a ledger counterpart the matcher believes in, and booking a second entry for
+it would double-count the transaction. Undecided means unproposed: a missed
+entry is a reconciliation that does not balance, and a duplicated entry is a
+reconciliation that balances and is wrong.
+
+A rejection changes that. `tallyd post -d decisions.json` reads the file the
+dashboard exports, and a suggestion whose every description pair the reviewer
+refused is treated as no suggestion at all — its statement lines join the ones
+needing entries. A batch where only one of four suppliers was refused stays
+where it is; part of it is still something the books know about.
+
+The dashboard shows the same thing under *What this implies*, and recomputes it
+as you work: rejecting a suggestion adds a row in the same gesture that pushes
+its lines back into the leftovers. Every statement line carries a precomputed
+proposal for exactly this reason — the browser cannot classify anything, so the
+classification has to be there before it is needed.
+
 ## Using it as a library
 
 ```ts
@@ -397,6 +484,20 @@ result.unmatchedStatement;  // charges and interest nobody booked
 const bridge = reconciliationBridge(result, { bankClosingBalance, bookClosingBalance });
 bridge.reconciled;          // true, or the matcher lost a line
 console.log(renderReconciliationBridge(bridge));
+```
+
+And booking what is left over takes two more:
+
+```ts
+import { linesNeedingEntries, proposeEntries, applyProposals } from "tallyd";
+
+const proposals = proposeEntries(linesNeedingEntries(result, memory), {
+  account: "1110",
+  ledger,             // so a line already booked is skipped rather than duplicated
+});
+
+proposals.filter((p) => p.outcome === "unclassified");  // still a person's problem
+const booked = applyProposals(ledger, proposals);
 ```
 
 ## Design notes

@@ -24,6 +24,7 @@ import type { BookLine } from "../reconcile/bankView.js";
 import type { Match, ReconciliationResult } from "../reconcile/matcher.js";
 import { significantReasons } from "../reconcile/matcher.js";
 import { decisionPayloads, type DecisionPayload } from "../reconcile/decisions.js";
+import type { Proposal } from "../reconcile/posting.js";
 import { trialBalance } from "../ledger/trialBalance.js";
 
 export interface AmountView {
@@ -78,6 +79,27 @@ export interface PostingView {
   readonly contra: readonly string[];
 }
 
+/**
+ * A journal entry a statement line implies, flattened for the page.
+ *
+ * One of these exists for *every* statement line, not only the ones currently
+ * unmatched, because the page has to be able to show what a rejection implies
+ * the moment it is made. Which of them are live is decided in the browser from
+ * the leftovers, which is state the browser already maintains.
+ */
+export interface ImpliedEntryView {
+  readonly lineId: string;
+  readonly date: string;
+  readonly description: string;
+  readonly amount: AmountView;
+  readonly outcome: Proposal["outcome"];
+  readonly account: string | null;
+  readonly accountName: string | null;
+  readonly rule: string | null;
+  readonly narration: string;
+  readonly reason: string;
+}
+
 export interface SeriesPoint {
   readonly date: string;
   readonly minor: number;
@@ -109,6 +131,9 @@ export interface DashboardData {
 
   readonly trialBalanceBalanced: boolean;
   readonly statementFormat: string;
+
+  /** What each statement line would imply if nothing in the books explained it. */
+  readonly implied: readonly ImpliedEntryView[];
 }
 
 function amountOf(money: Money): AmountView {
@@ -214,6 +239,8 @@ export interface DashboardInput {
   readonly bookClosingBalance: Money;
   readonly statementFormat: string;
   readonly generatedFor?: string;
+  /** One proposal per statement line, in any order. */
+  readonly implied?: readonly Proposal[];
 }
 
 export function dashboardData(input: DashboardInput): DashboardData {
@@ -303,5 +330,21 @@ export function dashboardData(input: DashboardInput): DashboardData {
 
     trialBalanceBalanced: trialBalance(input.ledger).balanced,
     statementFormat: input.statementFormat,
+
+    implied: (input.implied ?? []).map((proposal) => ({
+      lineId: proposal.line.id,
+      date: proposal.line.date,
+      description: proposal.line.description,
+      amount: amountOf(proposal.line.amount),
+      outcome: proposal.outcome,
+      account: proposal.account,
+      accountName:
+        proposal.account === null
+          ? null
+          : (input.ledger.chart?.find(proposal.account)?.name ?? proposal.account),
+      rule: proposal.rule?.id ?? null,
+      narration: proposal.entry?.narration ?? proposal.line.description,
+      reason: proposal.reason,
+    })),
   };
 }

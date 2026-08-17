@@ -15,6 +15,7 @@ import {
   type DecisionRecord,
 } from "../src/reconcile/decisions.js";
 import { MatchMemory } from "../src/reconcile/memory.js";
+import { proposeEntries } from "../src/reconcile/posting.js";
 import { demoLedger } from "../src/demo/month.js";
 import { DEMO_BANK_CSV } from "../src/demo/statement.js";
 import { supplierRunLedger, SUPPLIER_RUN_CSV } from "../src/demo/supplierRun.js";
@@ -36,6 +37,7 @@ function build(ledgerBuilder: () => ReturnType<typeof demoLedger>, csv: string):
     bankClosingBalance: statementClosingBalance(statement, Money.zero(GBP)),
     bookClosingBalance: books.reduce((total, line) => total.plus(line.amount), Money.zero(GBP)),
     statementFormat: "csv",
+    implied: proposeEntries(statement, { account: "1110", ledger }),
   });
 }
 
@@ -188,5 +190,88 @@ describe("the page itself", () => {
   it("stays one file with no network", () => {
     expect(html).not.toMatch(/<script[^>]+src=/);
     expect(html).not.toMatch(/https?:\/\//);
+  });
+});
+
+
+describe("what the reconciliation implies", () => {
+  it("carries a proposal for every statement line, not only the unmatched ones", () => {
+    const lineIds = new Set([
+      ...month.unmatchedStatement.map((line) => line.id),
+      ...month.matched.flatMap((match) => match.statement.map((line) => line.id)),
+      ...month.suggested.flatMap((match) => match.statement.map((line) => line.id)),
+    ]);
+
+    expect(month.implied.length).toBe(lineIds.size);
+    for (const proposal of month.implied) expect(lineIds.has(proposal.lineId)).toBe(true);
+  });
+
+  /**
+   * The reason for precomputing all of them: rejecting a suggestion has to
+   * produce a row immediately, and the browser cannot classify anything.
+   */
+  it("has something to show for a line currently sitting in the queue", () => {
+    const queued = month.suggested.flatMap((match) => match.statement.map((line) => line.id));
+    expect(queued.length).toBeGreaterThan(0);
+    for (const id of queued) {
+      expect(month.implied.some((proposal) => proposal.lineId === id)).toBe(true);
+    }
+  });
+
+  it("names the account and its name, so the page never has to look one up", () => {
+    const charge = month.implied.find((proposal) => proposal.description.includes("BANK CHARGES"));
+    expect(charge?.outcome).toBe("book");
+    expect(charge?.account).toBe("5800");
+    expect(charge?.accountName).toBe("Bank Charges");
+  });
+
+  it("classifies the interest the demo month never booked", () => {
+    const interest = month.implied.find((proposal) => proposal.description.includes("INTEREST"));
+    expect(interest?.account).toBe("4300");
+  });
+
+  it("says which rule fired, and why", () => {
+    const charge = month.implied.find((proposal) => proposal.description.includes("BANK CHARGES"));
+    expect(charge?.rule).toBe("bank-charges");
+    expect(charge?.reason).toContain("5800");
+  });
+
+  it("leaves an unclassifiable line with no account", () => {
+    const cash = month.implied.find((proposal) => proposal.description.includes("ATM CASH"));
+    expect(cash?.outcome).toBe("unclassified");
+    expect(cash?.account).toBeNull();
+  });
+
+  it("survives the JSON round trip into the page", () => {
+    const restored = JSON.parse(JSON.stringify(month)) as DashboardData;
+    expect(restored.implied).toEqual(month.implied);
+  });
+
+  it("is empty, not absent, when no proposals were supplied", () => {
+    const ledger = demoLedger();
+    const imported = importCsv(DEMO_BANK_CSV, { currency: GBP, idPrefix: "BANK" });
+    const books = bankView(ledger, "1110");
+    const bare = dashboardData({
+      ledger,
+      account: "1110",
+      books,
+      statement: imported.lines,
+      result: reconcile(books, imported.lines),
+      bankClosingBalance: statementClosingBalance(imported.lines, Money.zero(GBP)),
+      bookClosingBalance: books.reduce((total, line) => total.plus(line.amount), Money.zero(GBP)),
+      statementFormat: "csv",
+    });
+    expect(bare.implied).toEqual([]);
+  });
+
+  it("gets a section on the page that the script fills in", () => {
+    const html = renderDashboard(month);
+    expect(html).toContain('id="implied-section"');
+    expect(html).toContain('id="implied"');
+    expect(CLIENT_SCRIPT).toContain("renderImplied");
+  });
+
+  it("decides what is live from the leftovers, which is state the page keeps", () => {
+    expect(CLIENT_SCRIPT).toContain("impliedByLine[state.unmatchedStatement[i].id]");
   });
 });
