@@ -115,3 +115,22 @@ export {
   serialiseDecisions,
   decisionsFor,
 } from "./decisions.js";
+
+export {
+  type Direction,
+  type RuleMatch,
+  type RuleAction,
+  type PostingRule,
+  type Proposal,
+  type ProposalOutcome,
+  type ProposalOptions,
+  type ProposalSummary,
+  PostingRuleError,
+  standardRules,
+  proposeEntries,
+  applyProposals,
+  summariseProposals,
+  impliedEntryId,
+  parseRules,
+  renderProposals,
+} from "./posting.js";
