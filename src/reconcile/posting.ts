@@ -38,6 +38,8 @@ import type { ChartOfAccounts } from "../accounts/chart.js";
 import type { Ledger } from "../ledger/ledger.js";
 import { JournalEntry } from "../ledger/entry.js";
 import type { StatementLine } from "../statement/line.js";
+import type { ReconciliationResult } from "./matcher.js";
+import type { MatchMemory } from "./memory.js";
 
 /** Which way the money went, from the account holder's point of view. */
 export type Direction = "in" | "out" | "either";
@@ -623,4 +625,45 @@ export function renderProposals(
   }
 
   return lines.join("\n");
+}
+
+
+/**
+ * Which statement lines still need booking.
+ *
+ * The unmatched ones, plainly — nothing in the books corresponds to them. And
+ * then the ones sitting under a suggestion the reviewer has already refused:
+ * a rejected pairing is a person saying this line does *not* belong to that
+ * entry, which leaves the line with no counterpart at all.
+ *
+ * A suggestion nobody has decided is left alone. The matcher believes there is
+ * a ledger entry behind it, and booking a second one would double-count the
+ * transaction. Undecided means unproposed, which is the conservative reading
+ * and the right one: a missed entry is a reconciliation that does not balance,
+ * and a duplicated entry is a reconciliation that balances and is wrong.
+ *
+ * "Refused" means every description pair in the suggestion recalls as rejected.
+ * A batch where the reviewer refused one of four suppliers is still, in part,
+ * something the books know about.
+ */
+export function linesNeedingEntries(
+  result: ReconciliationResult,
+  memory?: MatchMemory,
+): readonly StatementLine[] {
+  const lines = [...result.unmatchedStatement];
+
+  if (memory !== undefined && memory.size > 0) {
+    for (const suggestion of result.suggested) {
+      const pairs = suggestion.statement.flatMap((statement) =>
+        suggestion.book.map((book) => memory.recall(statement.description, book.description)),
+      );
+      if (pairs.length > 0 && pairs.every((verdict) => verdict.kind === "rejected")) {
+        lines.push(...suggestion.statement);
+      }
+    }
+  }
+
+  return Object.freeze(
+    lines.sort((a, b) => (a.date === b.date ? (a.id < b.id ? -1 : 1) : a.date < b.date ? -1 : 1)),
+  );
 }

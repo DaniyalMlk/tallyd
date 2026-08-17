@@ -47,6 +47,7 @@ import {
   PostingRuleError,
   proposeEntries,
   renderProposals,
+  linesNeedingEntries,
   standardRules,
   summariseProposals,
   type ProposalOptions,
@@ -926,7 +927,8 @@ function postCommand(environment: CliEnvironment, argv: readonly string[]): CliR
   const decisions = decisionsPath === undefined ? [] : readDecisions(environment, decisionsPath);
 
   const run = reconciliationFor(environment, parsed, decisions);
-  const { ledger, account, currencyCode, result } = run;
+  const { ledger, account, currencyCode, result, memory } = run;
+  const needing = linesNeedingEntries(result, memory);
 
   const rulesPath = stringFlag(parsed, "rules");
   let rules = standardRules();
@@ -952,7 +954,7 @@ function postCommand(environment: CliEnvironment, argv: readonly string[]): CliR
   };
   let proposals;
   try {
-    proposals = proposeEntries(result.unmatchedStatement, options);
+    proposals = proposeEntries(needing, options);
   } catch (error) {
     if (error instanceof PostingRuleError) throw new ArgumentError(error.message);
     throw error;
@@ -1012,9 +1014,7 @@ function postCommand(environment: CliEnvironment, argv: readonly string[]): CliR
   }
 
   const lines = [
-    `${result.unmatchedStatement.length} statement ${
-      result.unmatchedStatement.length === 1 ? "line has" : "lines have"
-    } no counterpart in the books`,
+    `${needing.length} statement ${needing.length === 1 ? "line has" : "lines have"} no counterpart in the books`,
     "",
     renderProposals(proposals, summary),
   ];

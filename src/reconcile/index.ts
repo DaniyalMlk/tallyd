@@ -133,4 +133,5 @@ export {
   impliedEntryId,
   parseRules,
   renderProposals,
+  linesNeedingEntries,
 } from "./posting.js";

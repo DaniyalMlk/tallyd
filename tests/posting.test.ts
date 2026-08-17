@@ -5,7 +5,14 @@ import { Ledger } from "../src/ledger/ledger.js";
 import { standardChart } from "../src/accounts/standard.js";
 import { trialBalance } from "../src/ledger/trialBalance.js";
 import { statementLine, type StatementLine } from "../src/statement/line.js";
+import { importCsv } from "../src/statement/import.js";
+import { bankView } from "../src/reconcile/bankView.js";
+import { reconcile } from "../src/reconcile/matcher.js";
+import { MatchMemory } from "../src/reconcile/memory.js";
+import { demoLedger } from "../src/demo/month.js";
+import { DEMO_BANK_CSV } from "../src/demo/statement.js";
 import {
+  linesNeedingEntries,
   PostingRuleError,
   applyProposals,
   impliedEntryId,
@@ -359,5 +366,71 @@ describe("custom rules", () => {
 
   it("keeps the standard rules frozen against edits", () => {
     expect(Object.isFrozen(standardRules())).toBe(true);
+  });
+});
+
+
+describe("which lines still need booking", () => {
+  const imported = importCsv(DEMO_BANK_CSV, { currency: GBP, idPrefix: "BANK" });
+  const books = bankView(demoLedger(), "1110");
+  const result = reconcile(books, imported.lines);
+
+  const rejectAll = (which: number): MatchMemory => {
+    const suggestion = result.suggested[which];
+    if (suggestion === undefined) throw new Error("no such suggestion");
+    return MatchMemory.from(
+      suggestion.statement.flatMap((statement) =>
+        suggestion.book.map((book) => ({
+          statementDescription: statement.description,
+          bookDescription: book.description,
+          accepted: false,
+          on: date("2026-09-30"),
+        })),
+      ),
+    );
+  };
+
+  it("starts from the lines nothing matched", () => {
+    expect(linesNeedingEntries(result)).toEqual(
+      [...result.unmatchedStatement].sort((a, b) => (a.date === b.date ? (a.id < b.id ? -1 : 1) : a.date < b.date ? -1 : 1)),
+    );
+  });
+
+  it("leaves an undecided suggestion alone", () => {
+    expect(result.suggested.length).toBeGreaterThan(0);
+    expect(linesNeedingEntries(result, MatchMemory.empty())).toHaveLength(
+      result.unmatchedStatement.length,
+    );
+  });
+
+  it("adds the statement side of a suggestion the reviewer refused", () => {
+    const memory = rejectAll(0);
+    const needing = linesNeedingEntries(result, memory);
+
+    expect(needing.length).toBe(result.unmatchedStatement.length + (result.suggested[0]?.statement.length ?? 0));
+    for (const line of result.suggested[0]?.statement ?? []) {
+      expect(needing.some((candidate) => candidate.id === line.id)).toBe(true);
+    }
+  });
+
+  it("does not add a suggestion the reviewer confirmed", () => {
+    const suggestion = result.suggested[0];
+    const memory = MatchMemory.from(
+      (suggestion?.statement ?? []).flatMap((statement) =>
+        (suggestion?.book ?? []).map((book) => ({
+          statementDescription: statement.description,
+          bookDescription: book.description,
+          accepted: true,
+          on: date("2026-09-30"),
+        })),
+      ),
+    );
+    expect(linesNeedingEntries(result, memory)).toHaveLength(result.unmatchedStatement.length);
+  });
+
+  it("comes back in date order", () => {
+    const needing = linesNeedingEntries(result, rejectAll(0));
+    const dates = needing.map((line) => line.date);
+    expect([...dates].sort()).toEqual(dates);
   });
 });
