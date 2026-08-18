@@ -16,11 +16,15 @@
  * optional rather than required: leaving last month's revaluation in place and
  * running this month's gives the same balance sheet either way.
  *
- * **It is one entry.** Every exposure adjusts in the same entry, with a single
- * pair of gain and loss postings netting the whole thing. Splitting the gain
- * and loss out per account would be more granular and less useful: the
- * question a reviewer asks is "what did the rate move cost us this month", and
- * that is one number.
+ * **It works per open item, in one entry.** Each invoice is adjusted on its own
+ * line, carrying its own reference, because an account holding two invoices
+ * booked at different rates has no single rate it was booked at. Adjusting the
+ * account as one balance would leave the adjustment attributable to the account
+ * but not to either invoice, and settling one of them afterwards would then
+ * measure against what it was originally booked at — counting the same rate
+ * movement once as unrealised and again as realised. The gain and the loss
+ * still net into a single pair of postings, because "what did the rate move
+ * cost us this month" is one number.
  */
 
 import type { Currency } from "../money/currency.js";
@@ -31,7 +35,7 @@ import { type CalendarDate, date as parseDate } from "../ledger/date.js";
 import { JournalEntry, type PostingInput } from "../ledger/entry.js";
 import type { Ledger } from "../ledger/ledger.js";
 import type { ExchangeRate } from "./rate.js";
-import { type ExposureOptions, exposures } from "./exposure.js";
+import { type ExposureOptions, openItems } from "./exposure.js";
 import type { RateLookup, RateTable } from "./table.js";
 
 export class RevaluationError extends Error {
@@ -41,10 +45,12 @@ export class RevaluationError extends Error {
   }
 }
 
-/** What one exposure's retranslation came to. */
+/** What one open item's retranslation came to. */
 export interface RevaluationLine {
   readonly account: string;
   readonly name: string;
+  /** The item adjusted, or null for a balance belonging to no single one. */
+  readonly reference: string | null;
   readonly currency: Currency;
   readonly foreignBalance: Money;
   /** What the books carried it at before this entry. */
@@ -117,17 +123,18 @@ export function revalue(ledger: Ledger, options: RevaluationOptions): Revaluatio
   };
 
   const lines: RevaluationLine[] = [];
-  for (const exposure of exposures(ledger, exposureOptions)) {
-    const lookup = options.rates.lookup(exposure.currency, functional, asAt);
-    const closingAmount = lookup.rate.convert(exposure.foreignBalance, rounding);
-    const adjustment = closingAmount.minus(exposure.carryingAmount);
+  for (const item of openItems(ledger, exposureOptions)) {
+    const lookup = options.rates.lookup(item.currency, functional, asAt);
+    const closingAmount = lookup.rate.convert(item.foreignBalance, rounding);
+    const adjustment = closingAmount.minus(item.carryingAmount);
     lines.push(
       Object.freeze({
-        account: exposure.account,
-        name: exposure.name,
-        currency: exposure.currency,
-        foreignBalance: exposure.foreignBalance,
-        carryingAmount: exposure.carryingAmount,
+        account: item.account,
+        name: item.name,
+        reference: item.reference,
+        currency: item.currency,
+        foreignBalance: item.foreignBalance,
+        carryingAmount: item.carryingAmount,
         closingAmount,
         adjustment,
         closingRate: lookup.rate,
@@ -183,6 +190,7 @@ export function revalue(ledger: Ledger, options: RevaluationOptions): Revaluatio
     account: line.account,
     amount: line.adjustment,
     memo: `${line.foreignBalance.toString()} at ${line.closingRate.toDecimalString(6)}`,
+    ...(line.reference === null ? {} : { reference: line.reference }),
   }));
 
   // The P&L side. A net gain is a credit to income; a net loss is a debit to
@@ -229,7 +237,10 @@ export function renderRevaluation(result: Revaluation): string {
   if (result.lines.length === 0) {
     return `No foreign-currency balances to revalue at ${result.asAt}.`;
   }
-  const width = Math.max(12, ...result.lines.map((l) => l.name.length));
+  const width = Math.max(
+    12,
+    ...result.lines.map((l) => (l.reference === null ? l.name.length : l.name.length + l.reference.length + 3)),
+  );
   const lines = [
     `Revaluation at ${result.asAt} (books kept in ${result.functional.code})`,
     "-".repeat(width + 62),
@@ -243,7 +254,7 @@ export function renderRevaluation(result: Revaluation): string {
   for (const line of result.lines) {
     lines.push(
       line.account.padEnd(8) +
-        line.name.padEnd(width + 2) +
+        (line.reference === null ? line.name : `${line.name} / ${line.reference}`).padEnd(width + 2) +
         `${line.foreignBalance.toDecimalString()} ${line.currency.code}`.padStart(16) +
         line.carryingAmount.toDecimalString().padStart(12) +
         line.closingAmount.toDecimalString().padStart(12) +

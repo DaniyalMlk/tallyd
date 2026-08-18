@@ -204,6 +204,7 @@ export function settleForeignItem(ledger: Ledger, options: SettlementOptions): S
       amount: carriedAt.negated(),
       foreign: settled.negated(),
       memo: `Settled at ${rate.toDecimalString(6)}`,
+      ...(options.reference === undefined ? {} : { reference: options.reference }),
     },
     // The money that actually moved.
     { account: options.bankAccount, amount: received, memo: `${settled.toString()} settled` },
