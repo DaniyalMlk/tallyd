@@ -54,6 +54,9 @@ import {
 } from "../reconcile/posting.js";
 import type { BookLine } from "../reconcile/bankView.js";
 import type { ReconciliationResult } from "../reconcile/matcher.js";
+import { averageRate } from "../fx/average.js";
+import { type RateCsvOptions, RateDocumentError, ratesFromText } from "../fx/document.js";
+import { type Quote, RateTable } from "../fx/table.js";
 import {
   ArgumentError,
   booleanFlag,
@@ -189,6 +192,21 @@ const COMMANDS: Record<string, { describe: string; flags: FlagSpecs }> = {
       "no-groups": { kind: "boolean", describe: "Disable one-to-many matching" },
       memory: { kind: "string", short: "m", describe: "Confirmed counterparties (JSON)", placeholder: "file" },
       strict: { kind: "boolean", describe: "Exit 2 when any line could not be classified" },
+      json: { kind: "boolean", describe: "Emit JSON instead of text" },
+    },
+  },
+  rates: {
+    describe: "Inspect a rate table, price a pair on a date, convert an amount",
+    flags: {
+      rates: { kind: "string", short: "r", describe: "Rate table (JSON or CSV)", placeholder: "file" },
+      base: { kind: "string", short: "b", describe: "Base currency for a CSV of bare currency columns", placeholder: "code" },
+      invert: { kind: "boolean", describe: "The CSV quotes the base per unit of the column" },
+      pair: { kind: "string", short: "p", describe: "Pair to price, as BASE/QUOTE", placeholder: "a/b" },
+      on: { kind: "string", describe: "Date to price it on (default: today)", placeholder: "date" },
+      amount: { kind: "string", describe: "Convert this amount from the pair's base", placeholder: "n" },
+      average: { kind: "string", describe: "Average over a period instead, as from:to", placeholder: "a:b" },
+      method: { kind: "string", describe: "Average method: daily (default) or quoted", placeholder: "how" },
+      stale: { kind: "string", describe: "Days a quote may be behind the date asked for", placeholder: "days" },
       json: { kind: "boolean", describe: "Emit JSON instead of text" },
     },
   },
@@ -1080,6 +1098,216 @@ function readDecisions(environment: CliEnvironment, path: string) {
   }
 }
 
+/**
+ * Read the rate table a command was pointed at.
+ *
+ * The format is sniffed rather than declared, because a rate file arrives from
+ * two places — a download from a provider, and something this engine wrote —
+ * and asking which is which at the command line adds a flag that would only
+ * ever be wrong.
+ */
+function loadRates(environment: CliEnvironment, parsed: ParsedArgs): RateTable {
+  const path = requiredFlag(parsed, "rates");
+  const options: RateCsvOptions = {
+    ...(stringFlag(parsed, "base") === undefined
+      ? {}
+      : { base: stringFlag(parsed, "base") as string }),
+    ...(booleanFlag(parsed, "invert") ? { invert: true } : {}),
+    source: path,
+  };
+  let table: RateTable;
+  try {
+    table = ratesFromText(environment.readFile(path), options);
+  } catch (error) {
+    if (error instanceof RateDocumentError) throw new ArgumentError(error.message);
+    throw error;
+  }
+  const stale = stringFlag(parsed, "stale");
+  if (stale === undefined) return table;
+  const days = Number(stale);
+  if (!Number.isInteger(days) || days < 0) {
+    throw new ArgumentError(`--stale wants a whole number of days, got "${stale}"`);
+  }
+  return table.withOptions({ maxStaleDays: days });
+}
+
+function splitPair(text: string): { base: string; quote: string } {
+  const parts = text.split("/");
+  if (parts.length !== 2) throw new ArgumentError("--pair wants BASE/QUOTE, e.g. EUR/GBP");
+  const base = (parts[0] as string).trim().toUpperCase();
+  const quote = (parts[1] as string).trim().toUpperCase();
+  if (base === "" || quote === "") throw new ArgumentError("--pair wants BASE/QUOTE, e.g. EUR/GBP");
+  return { base, quote };
+}
+
+/**
+ * Look at a rate table: what it holds, what it says a pair is worth on a day,
+ * and what an amount converts to at that price.
+ *
+ * Every answer carries its provenance. A rate that came through two legs and a
+ * three-day-old quote is a different kind of answer from a rate published that
+ * morning, and a revaluation posted from the first one should be able to say
+ * so when someone asks where the number came from.
+ */
+function ratesCommand(environment: CliEnvironment, argv: readonly string[]): CliResult {
+  const parsed = parseArgs(argv, (COMMANDS["rates"] as { flags: FlagSpecs }).flags);
+  const table = loadRates(environment, parsed);
+  const json = booleanFlag(parsed, "json");
+  const pairText = stringFlag(parsed, "pair");
+
+  if (pairText === undefined) {
+    const quotes = table.all();
+    const first = quotes[0];
+    const last = quotes[quotes.length - 1];
+    if (json) {
+      return {
+        stdout: JSON.stringify(
+          {
+            quotes: table.size,
+            pairs: table.pairs(),
+            currencies: table.currencies(),
+            from: first?.date ?? null,
+            to: last?.date ?? null,
+            maxStaleDays: table.maxStaleDays,
+            maxLegs: table.maxLegs,
+          },
+          null,
+          2,
+        ),
+        stderr: "",
+        code: 0,
+      };
+    }
+    const lines = [
+      `${table.size} ${table.size === 1 ? "quote" : "quotes"} over ${table.pairs().length} ` +
+        `${table.pairs().length === 1 ? "pair" : "pairs"}` +
+        (first === undefined ? "" : `, ${first.date} to ${(last as Quote).date}`),
+      "",
+      ...table.pairs().map((pair) => {
+        const [base, quote] = pair.split("/") as [string, string];
+        const list = table.quotesFor(base, quote);
+        const oldest = list[0] as Quote;
+        const newest = list[list.length - 1] as Quote;
+        const noun = list.length === 1 ? "quote " : "quotes";
+        return (
+          `  ${pair.padEnd(9)}${String(list.length).padStart(4)} ${noun}  ` +
+          `${oldest.date} to ${newest.date}  latest ${newest.rate.toDecimalString(6)}`
+        );
+      }),
+      "",
+      `Currencies: ${table.currencies().join(", ")}`,
+      `A quote may be up to ${table.maxStaleDays} days behind the date asked for, ` +
+        `and a price may cross up to ${table.maxLegs} pairs.`,
+    ];
+    return { stdout: lines.join("\n"), stderr: "", code: 0 };
+  }
+
+  const { base, quote } = splitPair(pairText);
+  const averageText = stringFlag(parsed, "average");
+
+  if (averageText !== undefined) {
+    const parts = averageText.split(":");
+    if (parts.length !== 2) throw new ArgumentError("--average wants from:to");
+    const methodText = stringFlag(parsed, "method") ?? "daily";
+    if (methodText !== "daily" && methodText !== "quoted") {
+      throw new ArgumentError(`--method wants daily or quoted, got "${methodText}"`);
+    }
+    const found = averageRate(
+      table,
+      base,
+      quote,
+      parts[0] as string,
+      parts[1] as string,
+      methodText,
+    );
+    if (json) {
+      return {
+        stdout: JSON.stringify(
+          {
+            pair: found.rate.pair,
+            rate: found.rate.toDecimalString(10),
+            method: found.method,
+            from: found.range.from,
+            to: found.range.to,
+            observations: found.observations,
+            lowest: found.lowest.toDecimalString(10),
+            highest: found.highest.toDecimalString(10),
+          },
+          null,
+          2,
+        ),
+        stderr: "",
+        code: 0,
+      };
+    }
+    return {
+      stdout: [
+        `${found.rate.pair} average ${found.range.from} to ${found.range.to}`,
+        `  ${found.rate.toDecimalString(6)}  (${found.method}, ${found.observations} ` +
+          `${found.observations === 1 ? "observation" : "observations"})`,
+        `  low ${found.lowest.toDecimalString(6)}  high ${found.highest.toDecimalString(6)}`,
+      ].join("\n"),
+      stderr: "",
+      code: 0,
+    };
+  }
+
+  const onText = stringFlag(parsed, "on");
+  const on = onText === undefined ? environment.today() : date(onText);
+  const found = table.lookup(base, quote, on);
+
+  const amountText = stringFlag(parsed, "amount");
+  const converted =
+    amountText === undefined
+      ? undefined
+      : found.rate.convert(Money.parse(amountText, lookupCurrency(base)));
+
+  if (json) {
+    return {
+      stdout: JSON.stringify(
+        {
+          pair: found.rate.pair,
+          on,
+          rate: found.rate.toDecimalString(10),
+          direct: found.direct,
+          via: found.via,
+          quoteDates: found.quoteDates,
+          staleDays: found.staleDays,
+          sources: found.sources,
+          ...(converted === undefined
+            ? {}
+            : {
+                amount: Money.parse(amountText as string, lookupCurrency(base)).toDecimalString(),
+                converted: converted.toDecimalString(),
+                currency: converted.currency.code,
+              }),
+        },
+        null,
+        2,
+      ),
+      stderr: "",
+      code: 0,
+    };
+  }
+
+  const provenance = found.direct
+    ? `direct quote from ${found.quoteDates[0] as string}`
+    : `via ${found.via.join(" -> ")}, quotes ${found.quoteDates.join(", ")}`;
+  const lines = [
+    `${found.rate.toString()} on ${on}`,
+    `  ${provenance}`,
+    found.staleDays === 0
+      ? "  published that day"
+      : `  ${found.staleDays} ${found.staleDays === 1 ? "day" : "days"} behind the date asked for`,
+    `  source: ${found.sources.join(", ")}`,
+  ];
+  if (converted !== undefined) {
+    const original = Money.parse(amountText as string, lookupCurrency(base));
+    lines.push("", `  ${original.toString()}  ->  ${converted.toString()}`);
+  }
+  return { stdout: lines.join("\n"), stderr: "", code: 0 };
+}
+
 const HANDLERS: Record<string, (environment: CliEnvironment, argv: readonly string[]) => CliResult> = {
   report: reportCommand,
   ageing: ageingCommand,
@@ -1089,6 +1317,7 @@ const HANDLERS: Record<string, (environment: CliEnvironment, argv: readonly stri
   generate: generateCommand,
   bench: benchCommand,
   learn: learnCommand,
+  rates: ratesCommand,
   dashboard: dashboardCommand,
   post: postCommand,
 };
