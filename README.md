@@ -58,6 +58,7 @@ tallyd import    -s statement.csv          # what the reader made of it, no matc
 tallyd accounts  -l books.json
 tallyd dashboard -l books.json -s statement.csv -o reconciliation.html
 tallyd generate  -o ./fixtures --months 12 --invoices 30 --truth
+tallyd rates     -r ecb.csv -b EUR -p USD/GBP --on 2026-03-13 --amount 5000.00
 tallyd bench     --sizes 1:10,6:15,12:30
 tallyd learn     -m memory.json -d decisions.json
 tallyd reconcile -l books.json -s statement.csv -m memory.json
@@ -448,6 +449,59 @@ as you work: rejecting a suggestion adds a row in the same gesture that pushes
 its lines back into the leftovers. Every statement line carries a precomputed
 proposal for exactly this reason — the browser cannot classify anything, so the
 classification has to be there before it is needed.
+
+## Rates
+
+Everything above holds one currency at a time. A business that invoices in euros
+and banks in sterling needs somewhere for a price to come from, and it has to be
+as exact as the rest of the money path — so a rate is a pair of bigints, not a
+float. `0.8473` as an IEEE-754 double is `0.847300000000000053290705182007513940334320068359375`,
+and that error compounds through an inversion, a triangulation and a
+multiplication before landing in a revaluation entry where it looks like a real
+gain.
+
+```bash
+tallyd rates -r ecb.csv -b EUR                       # what the table holds
+tallyd rates -r ecb.csv -b EUR -p EUR/GBP --on 2026-03-15
+tallyd rates -r ecb.csv -b EUR -p USD/GBP --amount 5000.00
+tallyd rates -r ecb.csv -b EUR -p EUR/GBP --average 2026-03-01:2026-03-31
+```
+
+Rate files are sparse in three ways at once and a lookup has to survive all
+three. Sparse in **time**: rates are published on business days and asked for on
+any day, so lookup is on-or-before with a bound on staleness — a payment dated
+Sunday takes Friday's close, and a quote from four hundred days ago is not an
+answer. Sparse in **direction**: a file quoting EUR/GBP answers GBP/EUR by
+inversion. Sparse in **pairs**: a file quoting everything against the euro
+answers USD/GBP by going through it, found by a breadth-first walk so the answer
+uses the fewest legs available and ties break deterministically.
+
+Every answer carries how it was reached:
+
+```
+1 USD = 0.781858 GBP on 2026-03-14
+  via USD -> EUR -> GBP, quotes 2026-03-13, 2026-03-13
+  1 day behind the date asked for
+  source: ecb.csv
+```
+
+A triangulated rate composes exactly and rounds once, at the end. Converting leg
+by leg does not: 0.01 EUR through two rates of 1.5 gives 0.03 stepwise and 0.02
+composed, and 0.0225 is the true answer.
+
+Two readers, because rates arrive in two shapes. The JSON document is
+canonical — versioned, explicit about direction, carrying its own staleness
+bound. The CSV reader handles what actually comes out of a provider: a wide
+table, one row per date, one column per currency, with blank cells for the days
+that market was shut.
+
+Period averages come in two kinds, because "the average rate for March" means
+two different things. `--method quoted` averages the quotes that were published,
+which under-weights days a market was closed. `--method daily` (the default)
+averages one rate per calendar day, carrying the last close forward over
+weekends — which is what a monthly translation wants. Both are exact means of
+rationals, reduced at each step, so a year of daily quotes averages to the same
+value whatever order they arrive in.
 
 ## Using it as a library
 
