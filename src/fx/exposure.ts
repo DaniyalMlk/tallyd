@@ -161,6 +161,116 @@ export function exposures(ledger: Ledger, options: ExposureOptions = {}): readon
   return Object.freeze(out);
 }
 
+/** One open item: a balance on an account attributable to a single reference. */
+export interface OpenItem {
+  readonly account: string;
+  readonly name: string;
+  /** Null for movements that belong to the account rather than to any item. */
+  readonly reference: string | null;
+  readonly currency: Currency;
+  readonly foreignBalance: Money;
+  readonly carryingAmount: Money;
+  readonly impliedRate: ExchangeRate | null;
+  readonly lastMovement: CalendarDate | null;
+}
+
+/**
+ * The same exposures, broken down by the item each movement belongs to.
+ *
+ * This is the granularity a revaluation has to work at. An account holding two
+ * invoices booked at different rates has no single rate it was booked at, and
+ * adjusting it as one balance leaves the adjustment attributable to the account
+ * but not to either invoice — so settling one of them afterwards would measure
+ * against what it was originally booked at rather than what it is now carried
+ * at, and count the same rate movement twice.
+ */
+export function openItems(ledger: Ledger, options: ExposureOptions = {}): readonly OpenItem[] {
+  const chart = ledger.chart;
+  const functional = functionalCodeOf(ledger, options.functional);
+  const only = options.accounts === undefined ? null : new Set(options.accounts);
+  const excluded = new Set(options.exclude ?? []);
+
+  interface Running {
+    account: string;
+    reference: string | null;
+    currency: Currency;
+    foreign: Money[];
+    carrying: Money[];
+    lastMovement: CalendarDate | null;
+  }
+
+  const running = new Map<string, Running>();
+
+  for (const entry of ledger.all()) {
+    if (options.asAt !== undefined && compareDates(entry.date, options.asAt) > 0) continue;
+    for (const posting of entry.postings) {
+      if (only !== null && !only.has(posting.account)) continue;
+      if (excluded.has(posting.account)) continue;
+
+      const declared = chart?.find(posting.account)?.currency;
+      const currency = declared ?? posting.foreign?.currency;
+      if (currency === undefined || currency.code === functional) continue;
+
+      const reference = entry.referenceFor(posting);
+      const key = `${posting.account} ${reference ?? ""}`;
+      let state = running.get(key);
+      if (state === undefined) {
+        state = {
+          account: posting.account,
+          reference,
+          currency,
+          foreign: [],
+          carrying: [],
+          lastMovement: null,
+        };
+        running.set(key, state);
+      }
+
+      if (posting.foreign !== null) state.foreign.push(posting.foreign);
+      if (posting.amount.currency.code === functional) state.carrying.push(posting.amount);
+      state.lastMovement =
+        state.lastMovement === null || compareDates(entry.date, state.lastMovement) > 0
+          ? entry.date
+          : state.lastMovement;
+    }
+  }
+
+  const out: OpenItem[] = [];
+  for (const state of running.values()) {
+    const foreignBalance = sumMoney(state.foreign, state.currency);
+    const carryingAmount = sumMoney(state.carrying, functional);
+    if (foreignBalance.isZero && carryingAmount.isZero && options.includeSettled !== true) continue;
+    if (foreignBalance.isZero && options.includeSettled !== true) continue;
+
+    let impliedRate: ExchangeRate | null = null;
+    try {
+      impliedRate = ExchangeRate.implied(foreignBalance, carryingAmount);
+    } catch (error) {
+      if (!(error instanceof RateError)) throw error;
+    }
+
+    out.push(
+      Object.freeze({
+        account: state.account,
+        name: chart?.find(state.account)?.name ?? state.account,
+        reference: state.reference,
+        currency: state.currency,
+        foreignBalance,
+        carryingAmount,
+        impliedRate,
+        lastMovement: state.lastMovement,
+      }),
+    );
+  }
+
+  out.sort((a, b) => {
+    if (a.currency.code !== b.currency.code) return a.currency.code.localeCompare(b.currency.code);
+    if (a.account !== b.account) return a.account.localeCompare(b.account);
+    return (a.reference ?? "").localeCompare(b.reference ?? "");
+  });
+  return Object.freeze(out);
+}
+
 /** The exposure on one account, or undefined when there is none. */
 export function exposureFor(
   ledger: Ledger,
@@ -191,9 +301,9 @@ export function exposureForReference(
   let seen = false;
 
   for (const entry of ledger.all()) {
-    if (entry.reference !== reference) continue;
     for (const posting of entry.postings) {
       if (posting.account !== account) continue;
+      if (entry.referenceFor(posting) !== reference) continue;
       seen = true;
       if (posting.foreign !== null) foreign.push(posting.foreign);
       if (posting.amount.currency.code === functional) carrying.push(posting.amount);
