@@ -65,6 +65,13 @@ export const STANDARD_ACCOUNTS: readonly AccountDefinition[] = [
   { code: "4100", name: "Sales", type: "income", parent: "4000" },
   { code: "4200", name: "Consulting", type: "income", parent: "4000" },
   { code: "4300", name: "Interest Income", type: "income", parent: "4000" },
+  {
+    code: "4400",
+    name: "Foreign Exchange Gain",
+    type: "income",
+    parent: "4000",
+    description: "Where a balance retranslated or settled in your favour lands",
+  },
 
   // 5000 — expenses
   { code: "5000", name: "Expenses", type: "expense", placeholder: true },
@@ -83,6 +90,13 @@ export const STANDARD_ACCOUNTS: readonly AccountDefinition[] = [
   { code: "5700", name: "Professional Fees", type: "expense", parent: "5000" },
   { code: "5800", name: "Bank Charges", type: "expense", parent: "5000" },
   { code: "5900", name: "Depreciation", type: "expense", parent: "5000" },
+  {
+    code: "5950",
+    name: "Foreign Exchange Loss",
+    type: "expense",
+    parent: "5000",
+    description: "The other side of 4400, kept separate so the P&L shows both",
+  },
 ];
 
 export function standardChart(currency: Currency | string = "GBP"): ChartOfAccounts {

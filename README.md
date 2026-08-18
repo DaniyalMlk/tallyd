@@ -42,6 +42,7 @@ npm run demo          # a worked month, posted and reported
 npm run demo:ingest   # the same month as the bank recorded it
 npm run demo:reconcile # the two, matched against each other
 npm run demo:reports  # income statement, balance sheet and ageing
+npm run demo:foreign  # a quarter with a euro customer and a dollar supplier
 npm run bench         # the matcher timed and scored over generated books
 ```
 
@@ -59,6 +60,7 @@ tallyd accounts  -l books.json
 tallyd dashboard -l books.json -s statement.csv -o reconciliation.html
 tallyd generate  -o ./fixtures --months 12 --invoices 30 --truth
 tallyd rates     -r ecb.csv -b EUR -p USD/GBP --on 2026-03-13 --amount 5000.00
+tallyd revalue   -l books.json -r ecb.csv -b EUR --as-at 2026-03-31 -o closed.json
 tallyd bench     --sizes 1:10,6:15,12:30
 tallyd learn     -m memory.json -d decisions.json
 tallyd reconcile -l books.json -s statement.csv -m memory.json
@@ -502,6 +504,97 @@ averages one rate per calendar day, carrying the last close forward over
 weekends — which is what a monthly translation wants. Both are exact means of
 rationals, reduced at each step, so a year of daily quotes averages to the same
 value whatever order they arrive in.
+
+## Balances in another currency
+
+An account denominated in something other than the chart's currency is what
+makes a balance an exposure. Nothing needs a monetary/non-monetary flag: a
+machine bought in euros and carried at historical cost never had a foreign
+denomination — it was booked straight to a sterling asset account at the rate on
+the day — so it never shows up and is never retranslated. That is the right
+answer, and it falls out of the model rather than being enforced by a rule.
+
+A posting on such an account carries two amounts:
+
+```ts
+{ account: "1131", amount: Money.parse("840.00", GBP), foreign: Money.parse("1000.00", EUR) }
+```
+
+`amount` is what the books are kept in and what the entry has to balance in.
+The invariant does not become "balances in every currency at once", because
+that was never true of a real transaction: a euro invoice is one economic event
+with two numbers attached, 1,000 EUR of receivable booked at 840.00 GBP. The
+second is what the trial balance adds up; the first is what the customer owes.
+
+### The close, and what settlement realises
+
+```bash
+tallyd revalue -l books.json --show                  # what is exposed
+tallyd revalue -l books.json -r ecb.json --as-at 2026-03-31
+tallyd revalue -l books.json -r ecb.json --as-at 2026-03-31 -o closed.json
+```
+
+The revaluation retranslates each balance at the closing rate and books the
+difference. It computes and prints by default and only writes when told to,
+because the rate you use at a close is a choice and the person making it should
+see the numbers before the ledger grows an entry.
+
+Two properties it is built around. It is **idempotent**: the adjustment is
+measured against the carrying amount, which already includes every revaluation
+posted before it, so running it twice on the same date produces the second
+entry as nothing at all. The usual reverse-it-next-month dance is therefore
+optional rather than required — leaving March's revaluation in place and
+running June's gives the same balance sheet either way, and there is a test that
+says so.
+
+And it works **per open item**. An account holding two invoices booked at
+different rates has no single rate it was booked at:
+
+```
+Account Name                                          Balance     Carried     Closing       Move
+1131    Accounts Receivable (EUR) / INV-014       1000.00 EUR      840.00      860.00      20.00
+1131    Accounts Receivable (EUR) / INV-021        500.00 EUR      425.00      430.00       5.00
+2101    Accounts Payable (USD) / BILL-221         -500.00 USD     -390.00     -385.00       5.00
+```
+
+That is the design decision that mattered, and it was not the first attempt.
+Adjusting each account as one balance passes every obvious test — the balance
+sheet is right, the entry balances, the trial balance agrees — and is still
+wrong, because the adjustment ends up attributable to the account and not to
+either invoice. Settle one of them afterwards and it measures against what that
+invoice was originally booked at, so the movement between the invoice and the
+close gets counted twice: once as unrealised in the first quarter, once as
+realised in the second. The demo caught it by adding the two halves up and
+finding 45.00 where the rates only ever moved 40.00.
+
+The fix is a posting that can name the open item it belongs to. A revaluation
+adjusts several invoices in one entry, each on its own line carrying its own
+reference, and settlement then measures against what that item is *now carried
+at* rather than what it was booked at:
+
+```
+  INV-021       500.00 EUR  carried at   430.00  received   435.00  realised    5.00
+```
+
+Booked at 0.8500, revalued to 0.8600, received at 0.8700 — 5.00 unrealised in
+the first quarter and 5.00 realised in the second, adding to the 10.00 the rate
+actually moved. `npm run demo:foreign` runs the whole quarter and checks that
+arithmetic against the rates directly, without reference to any of the entries
+it just posted.
+
+Settlement will also take what the bank actually credited rather than a rate:
+
+```ts
+settleForeignItem(ledger, {
+  id: "RCT-021", date: "2026-04-20",
+  account: "1131", bankAccount: "1110", reference: "INV-021",
+  settledFor: Money.parse("864.20", GBP),   // what landed, spread and all
+});
+```
+
+Partial settlements take their share of the carrying amount pro rata, as one
+exact bigint division, so settling half a receivable leaves the other half
+carried at exactly the rate it was carried at before.
 
 ## Using it as a library
 

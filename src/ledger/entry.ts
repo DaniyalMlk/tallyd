@@ -38,6 +38,16 @@ export interface PostingInput {
   account: string;
   amount: Money;
   memo?: string;
+  /**
+   * The open item this line belongs to, when that is narrower than the entry's
+   * own reference. See `Posting.reference`.
+   */
+  reference?: string;
+  /**
+   * What actually moved, when that was not in the currency the books are kept
+   * in. See `Posting.foreign`.
+   */
+  foreign?: Money;
 }
 
 export interface Posting {
@@ -47,6 +57,36 @@ export interface Posting {
   readonly memo: string;
   /** Index within the entry, stable and used for deterministic ordering. */
   readonly index: number;
+  /**
+   * The open item this line belongs to, when the entry as a whole is about
+   * more than one of them.
+   *
+   * A revaluation adjusts several invoices in a single entry, and each of its
+   * postings belongs to a different one. Without this, the adjustment is
+   * attributable to the account but not to the item, and settling one invoice
+   * out of several would measure against what that invoice was originally
+   * booked at rather than what it is now carried at — booking the same rate
+   * movement once as unrealised and again as realised.
+   *
+   * Null means "whatever the entry says", which is the ordinary case.
+   */
+  readonly reference: string | null;
+  /**
+   * The transaction-currency amount, when the posting was denominated in
+   * something other than the functional currency.
+   *
+   * `amount` is always the figure the books are kept in and always the one the
+   * entry has to balance in — the invariant does not become "balances in every
+   * currency at once", because it never was true of a real transaction. A euro
+   * invoice is one economic event with two numbers attached: 1,000 EUR of
+   * receivable, booked at 847.30 GBP. The second is what the trial balance
+   * adds up; the first is what the customer owes and what a revaluation at the
+   * close has to look at.
+   *
+   * Signs agree with `amount`. A debit of 847.30 GBP carrying a credit of
+   * 1,000 EUR would be describing two different transactions.
+   */
+  readonly foreign: Money | null;
 }
 
 export interface JournalEntryInput {
@@ -116,11 +156,43 @@ export class JournalEntry {
         );
       }
       if (chart !== undefined) chart.assertPostable(p.account);
+      const foreign = p.foreign ?? null;
+      if (foreign !== null) {
+        if (foreign.isZero) {
+          throw new InvalidEntryError(
+            `Entry ${input.id} posting ${index} to ${p.account} has a foreign amount of zero`,
+          );
+        }
+        if (foreign.currency.code === p.amount.currency.code) {
+          throw new InvalidEntryError(
+            `Entry ${input.id} posting ${index} to ${p.account} gives a ${foreign.currency.code} ` +
+              `amount as the foreign side of a ${p.amount.currency.code} posting`,
+          );
+        }
+        if (foreign.sign !== p.amount.sign) {
+          throw new InvalidEntryError(
+            `Entry ${input.id} posting ${index} to ${p.account}: ${foreign.toString()} and ` +
+              `${p.amount.toString()} are on opposite sides`,
+          );
+        }
+        // An account's declared currency is what its foreign balance is in.
+        // Letting a EUR posting land on a USD account would produce a balance
+        // that no single closing rate can retranslate.
+        const declared = chart?.find(p.account)?.currency;
+        if (declared !== undefined && declared.code !== foreign.currency.code) {
+          throw new InvalidEntryError(
+            `Entry ${input.id} posting ${index}: account ${p.account} is denominated in ` +
+              `${declared.code}, not ${foreign.currency.code}`,
+          );
+        }
+      }
       return Object.freeze({
         account: p.account,
         amount: p.amount,
         memo: p.memo ?? "",
         index,
+        reference: p.reference ?? null,
+        foreign,
       });
     });
 
@@ -195,6 +267,35 @@ export class JournalEntry {
     return this.currencies.length > 1;
   }
 
+  /** Postings that record something that happened in another currency. */
+  get foreignPostings(): readonly Posting[] {
+    return this.postings.filter((p) => p.foreign !== null);
+  }
+
+  get hasForeignAmounts(): boolean {
+    return this.postings.some((p) => p.foreign !== null);
+  }
+
+  /** The transaction currencies this entry touches, deduplicated. */
+  get foreignCurrencies(): readonly Currency[] {
+    const seen = new Map<string, Currency>();
+    for (const p of this.postings) {
+      if (p.foreign !== null) seen.set(p.foreign.currency.code, p.foreign.currency);
+    }
+    return [...seen.values()];
+  }
+
+  /** Net foreign-currency effect on one account within this entry. */
+  foreignAmountFor(account: string, currency: Currency | string): Money {
+    const code = typeof currency === "string" ? currency.toUpperCase() : currency.code;
+    return sumMoney(
+      this.postings
+        .filter((p) => p.account === account && p.foreign?.currency.code === code)
+        .map((p) => p.foreign as Money),
+      code,
+    );
+  }
+
   /** Total of the debit side in the given currency — the entry's "size". */
   total(currency?: Currency | string): Money {
     const code =
@@ -208,6 +309,11 @@ export class JournalEntry {
       matching.map((p) => p.amount),
       code,
     );
+  }
+
+  /** The open item a posting belongs to: its own, or the entry's. */
+  referenceFor(posting: Posting): string | null {
+    return posting.reference ?? this.reference;
   }
 
   touches(account: string): boolean {
@@ -239,6 +345,8 @@ export class JournalEntry {
         account: p.account,
         amount: p.amount.negated(),
         memo: p.memo,
+        ...(p.reference === null ? {} : { reference: p.reference }),
+        ...(p.foreign === null ? {} : { foreign: p.foreign.negated() }),
       })),
       ...(this.reference !== null ? { reference: this.reference } : {}),
       tags: this.tags,
@@ -247,9 +355,10 @@ export class JournalEntry {
   }
 
   toString(): string {
-    const lines = this.postings.map(
-      (p) => `  ${p.account.padEnd(8)} ${p.amount.toDecimalString().padStart(12)}`,
-    );
+    const lines = this.postings.map((p) => {
+      const base = `  ${p.account.padEnd(8)} ${p.amount.toDecimalString().padStart(12)}`;
+      return p.foreign === null ? base : `${base}  (${p.foreign.toString()})`;
+    });
     return [`${this.date} ${this.id} ${this.narration}`, ...lines].join("\n");
   }
 
@@ -265,6 +374,8 @@ export class JournalEntry {
         account: p.account,
         amount: p.amount.toJSON(),
         memo: p.memo,
+        reference: p.reference,
+        foreign: p.foreign === null ? null : p.foreign.toJSON(),
       })),
     };
   }

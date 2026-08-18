@@ -111,6 +111,15 @@ all disagree slightly.
 | `src/reconcile/memory.ts` | Counterparty keys learnt from reviewed decisions |
 | `src/reconcile/decisions.ts` | The decisions document, and what a match emits |
 | `src/reconcile/posting.ts` | Classification rules and the entries a statement implies |
+| `src/fx/rate.ts` | An exchange rate as an exact rational over bigints |
+| `src/fx/table.ts` | Dated quotes; on-or-before lookup, inversion, triangulation |
+| `src/fx/average.ts` | Period averages, quoted and per-calendar-day |
+| `src/fx/document.ts` | The rate document, and the wide CSV a provider publishes |
+| `src/fx/exposure.ts` | Foreign balances, per account and per open item |
+| `src/fx/revaluation.ts` | Retranslation at a closing rate, idempotent by construction |
+| `src/fx/settlement.ts` | Realised gain and loss, measured against what is carried |
+| `src/demo/foreign.ts` | A quarter with a euro customer and a dollar supplier |
+| `src/demo/foreignReport.ts` | That quarter closed, settled, and the arithmetic checked |
 
 1150 tests across 46 files, typecheck clean.
 
