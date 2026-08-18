@@ -34,6 +34,11 @@ export interface PostingDocument {
   readonly amount: string;
   readonly currency: string;
   readonly memo?: string;
+  /**
+   * The transaction-currency amount, when the posting recorded something that
+   * happened in a currency other than the one the books are kept in.
+   */
+  readonly foreign?: { readonly amount: string; readonly currency: string };
 }
 
 export interface EntryDocument {
@@ -76,6 +81,14 @@ export function entryToDocument(entry: JournalEntry): EntryDocument {
       amount: posting.amount.toDecimalString(),
       currency: posting.amount.currency.code,
       ...(posting.memo === "" ? {} : { memo: posting.memo }),
+      ...(posting.foreign === null
+        ? {}
+        : {
+            foreign: {
+              amount: posting.foreign.toDecimalString(),
+              currency: posting.foreign.currency.code,
+            },
+          }),
     })),
     ...(entry.reference === null ? {} : { reference: entry.reference }),
     ...(entry.tags.length === 0 ? {} : { tags: [...entry.tags] }),
@@ -173,6 +186,27 @@ function readEntry(raw: unknown, index: number, fallbackCurrency: string): Journ
             `amounts must be decimal strings so no precision is lost in transit`,
         );
       }
+      const rawForeign = posting["foreign"];
+      let foreign: Money | undefined;
+      if (rawForeign !== undefined && rawForeign !== null) {
+        if (typeof rawForeign !== "object") {
+          throw new LedgerDocumentError(
+            `entries[${index}].postings[${postingIndex}].foreign must be an object`,
+          );
+        }
+        const record = rawForeign as Record<string, unknown>;
+        if (typeof record["amount"] === "number") {
+          throw new LedgerDocumentError(
+            `entries[${index}].postings[${postingIndex}].foreign.amount is a number; ` +
+              `amounts must be decimal strings so no precision is lost in transit`,
+          );
+        }
+        foreign = Money.parse(
+          requireString(record["amount"], "posting.foreign.amount"),
+          requireString(record["currency"], "posting.foreign.currency"),
+        );
+      }
+
       return {
         account: requireString(posting["account"], "posting.account"),
         amount: Money.parse(
@@ -184,6 +218,7 @@ function readEntry(raw: unknown, index: number, fallbackCurrency: string): Journ
         ...(posting["memo"] === undefined
           ? {}
           : { memo: requireString(posting["memo"], "posting.memo") }),
+        ...(foreign === undefined ? {} : { foreign }),
       };
     },
   );
