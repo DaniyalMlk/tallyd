@@ -55,6 +55,13 @@ import {
 import type { BookLine } from "../reconcile/bankView.js";
 import type { ReconciliationResult } from "../reconcile/matcher.js";
 import { averageRate } from "../fx/average.js";
+import { exposures, renderExposures } from "../fx/exposure.js";
+import {
+  type RevaluationOptions,
+  RevaluationError,
+  renderRevaluation,
+  revalue,
+} from "../fx/revaluation.js";
 import { type RateCsvOptions, RateDocumentError, ratesFromText } from "../fx/document.js";
 import { type Quote, RateTable } from "../fx/table.js";
 import {
@@ -207,6 +214,22 @@ const COMMANDS: Record<string, { describe: string; flags: FlagSpecs }> = {
       average: { kind: "string", describe: "Average over a period instead, as from:to", placeholder: "a:b" },
       method: { kind: "string", describe: "Average method: daily (default) or quoted", placeholder: "how" },
       stale: { kind: "string", describe: "Days a quote may be behind the date asked for", placeholder: "days" },
+      json: { kind: "boolean", describe: "Emit JSON instead of text" },
+    },
+  },
+  revalue: {
+    describe: "Retranslate foreign-currency balances at a closing rate",
+    flags: {
+      ledger: { kind: "string", short: "l", describe: "Ledger document (JSON)", placeholder: "file" },
+      rates: { kind: "string", short: "r", describe: "Rate table (JSON or CSV)", placeholder: "file" },
+      base: { kind: "string", short: "b", describe: "Base currency for a CSV of bare currency columns", placeholder: "code" },
+      "as-at": { kind: "string", describe: "Closing date (default: today)", placeholder: "date" },
+      out: { kind: "string", short: "o", describe: "Write the ledger with the revaluation applied", placeholder: "file" },
+      gain: { kind: "string", describe: "Income account for a net gain (default 4400)", placeholder: "code" },
+      loss: { kind: "string", describe: "Expense account for a net loss (default 5950)", placeholder: "code" },
+      exclude: { kind: "string", describe: "Accounts to leave alone, comma-separated", placeholder: "a,b" },
+      stale: { kind: "string", describe: "Days a quote may be behind the closing date", placeholder: "days" },
+      show: { kind: "boolean", describe: "Print the exposures and stop, without revaluing" },
       json: { kind: "boolean", describe: "Emit JSON instead of text" },
     },
   },
@@ -1308,6 +1331,141 @@ function ratesCommand(environment: CliEnvironment, argv: readonly string[]): Cli
   return { stdout: lines.join("\n"), stderr: "", code: 0 };
 }
 
+/**
+ * Retranslate what the books hold in another currency.
+ *
+ * The command computes and prints by default and only writes when told to,
+ * because a revaluation is a judgement about a date rather than a fact about
+ * one: the rate you use at the close is a choice, and the person making it
+ * should see the numbers before the ledger grows an entry.
+ */
+function revalueCommand(environment: CliEnvironment, argv: readonly string[]): CliResult {
+  const parsed = parseArgs(argv, (COMMANDS["revalue"] as { flags: FlagSpecs }).flags);
+  const ledger = loadLedger(environment, requiredFlag(parsed, "ledger"));
+  const asAtText = stringFlag(parsed, "as-at");
+  const asAt = asAtText === undefined ? environment.today() : date(asAtText);
+
+  const excludeText = stringFlag(parsed, "exclude");
+  const exclude =
+    excludeText === undefined
+      ? undefined
+      : excludeText
+          .split(",")
+          .map((part) => part.trim())
+          .filter((part) => part !== "");
+
+  const functional = ledger.chart?.defaultCurrency.code ?? "GBP";
+
+  if (booleanFlag(parsed, "show")) {
+    const list = exposures(ledger, {
+      asAt,
+      ...(exclude === undefined ? {} : { exclude }),
+    });
+    if (booleanFlag(parsed, "json")) {
+      return {
+        stdout: JSON.stringify(
+          {
+            asAt,
+            functional,
+            exposures: list.map((item) => ({
+              account: item.account,
+              name: item.name,
+              currency: item.currency.code,
+              foreignBalance: item.foreignBalance.toDecimalString(),
+              carryingAmount: item.carryingAmount.toDecimalString(),
+              impliedRate: item.impliedRate?.toDecimalString(10) ?? null,
+              lastMovement: item.lastMovement,
+            })),
+          },
+          null,
+          2,
+        ),
+        stderr: "",
+        code: 0,
+      };
+    }
+    return { stdout: renderExposures(list, functional), stderr: "", code: 0 };
+  }
+
+  const rates = loadRates(environment, parsed);
+  const options: RevaluationOptions = {
+    asAt,
+    rates,
+    ...(exclude === undefined ? {} : { exclude }),
+    ...(stringFlag(parsed, "gain") === undefined
+      ? {}
+      : { gainAccount: stringFlag(parsed, "gain") as string }),
+    ...(stringFlag(parsed, "loss") === undefined
+      ? {}
+      : { lossAccount: stringFlag(parsed, "loss") as string }),
+  };
+
+  let result;
+  try {
+    result = revalue(ledger, options);
+  } catch (error) {
+    if (error instanceof RevaluationError) throw new ArgumentError(error.message);
+    throw error;
+  }
+
+  const out = stringFlag(parsed, "out");
+  let written: string | undefined;
+  if (out !== undefined) {
+    if (environment.writeFile === undefined) {
+      return { stdout: "", stderr: "This environment cannot write files.\n", code: 1 };
+    }
+    environment.writeFile(
+      out,
+      ledgerToJson(result.entry === null ? ledger : ledger.post(result.entry)),
+    );
+    written = out;
+  }
+
+  if (booleanFlag(parsed, "json")) {
+    return {
+      stdout: JSON.stringify(
+        {
+          asAt: result.asAt,
+          functional: result.functional.code,
+          lines: result.lines.map((line) => ({
+            account: line.account,
+            name: line.name,
+            currency: line.currency.code,
+            foreignBalance: line.foreignBalance.toDecimalString(),
+            carryingAmount: line.carryingAmount.toDecimalString(),
+            closingAmount: line.closingAmount.toDecimalString(),
+            adjustment: line.adjustment.toDecimalString(),
+            closingRate: line.closingRate.toDecimalString(10),
+            via: line.lookup.via,
+            staleDays: line.lookup.staleDays,
+          })),
+          net: result.net.toDecimalString(),
+          gain: result.gain.toDecimalString(),
+          loss: result.loss.toDecimalString(),
+          entry: result.entry?.id ?? null,
+          ...(written === undefined ? {} : { written }),
+        },
+        null,
+        2,
+      ),
+      stderr: "",
+      code: 0,
+    };
+  }
+
+  const lines = [renderRevaluation(result)];
+  if (written !== undefined) {
+    lines.push(
+      result.entry === null
+        ? `Wrote ${written} unchanged.`
+        : `Wrote ${written} with ${result.entry.id} applied.`,
+    );
+  } else if (result.entry !== null) {
+    lines.push("Nothing was written. Pass --out to apply it.");
+  }
+  return { stdout: lines.join("\n"), stderr: "", code: 0 };
+}
+
 const HANDLERS: Record<string, (environment: CliEnvironment, argv: readonly string[]) => CliResult> = {
   report: reportCommand,
   ageing: ageingCommand,
@@ -1318,6 +1476,7 @@ const HANDLERS: Record<string, (environment: CliEnvironment, argv: readonly stri
   bench: benchCommand,
   learn: learnCommand,
   rates: ratesCommand,
+  revalue: revalueCommand,
   dashboard: dashboardCommand,
   post: postCommand,
 };
