@@ -10,7 +10,7 @@ three invoices. That matching problem is what this project is actually about.
 
 ## Status
 
-Phases 1–9 are done; see [`ROADMAP.md`](./ROADMAP.md). The accounting core is
+Phases 1–10 are done; see [`ROADMAP.md`](./ROADMAP.md). The accounting core is
 complete and tested — money, the chart of accounts, journal entries, the ledger
 and the trial balance — and so is statement ingestion: CSV and OFX readers,
 format detection and duplicate flagging. The matching engine works end to end,
@@ -32,11 +32,18 @@ The cycle now closes at both ends. Decisions leave the review UI as a file the
 CLI already reads, and the statement lines nothing in the books explains come
 back as journal entries — classified, balanced, and impossible to post twice.
 
+The engine also holds more than one currency now. Rates are exact rationals with
+dated lookup that inverts and triangulates; balances denominated in another
+currency are retranslated at the close, per open item so that settling one
+invoice out of several cannot count a rate movement twice; and the statements can
+be presented in a currency the books are not kept in, with the translation
+adjustment as a line rather than a plug.
+
 ## Running it
 
 ```bash
 npm install
-npm test              # 995 tests
+npm test              # 1,420 tests
 npm run typecheck
 npm run demo          # a worked month, posted and reported
 npm run demo:ingest   # the same month as the bank recorded it
@@ -61,6 +68,7 @@ tallyd dashboard -l books.json -s statement.csv -o reconciliation.html
 tallyd generate  -o ./fixtures --months 12 --invoices 30 --truth
 tallyd rates     -r ecb.csv -b EUR -p USD/GBP --on 2026-03-13 --amount 5000.00
 tallyd revalue   -l books.json -r ecb.csv -b EUR --as-at 2026-03-31 -o closed.json
+tallyd report    -l books.json -p USD -r usd.csv -b GBP --as-at 2026-12-31
 tallyd bench     --sizes 1:10,6:15,12:30
 tallyd learn     -m memory.json -d decisions.json
 tallyd reconcile -l books.json -s statement.csv -m memory.json
@@ -595,6 +603,56 @@ settleForeignItem(ledger, {
 Partial settlements take their share of the carrying amount pro rata, as one
 exact bigint division, so settling half a receivable leaves the other half
 carried at exactly the rate it was carried at before.
+
+## Reading the books in another currency
+
+That is a different problem from a euro receivable and it does not have the same
+answer. A receivable is retranslated because what it is worth genuinely changed.
+Nothing changes here: the business did what it did, and someone — a parent
+consolidating a subsidiary, a lender, a euro investor reading sterling
+accounts — wants to read the result in dollars. So no balance is restated; the
+whole statement is, and each line takes the rate its nature calls for.
+
+```bash
+tallyd report -l books.json --as-at 2026-12-31 --from 2026-01-01 --to 2026-12-31 \
+  --present USD --rates usd.csv --base GBP
+```
+
+```
+Trial balance as at 2026-12-31, presented in USD (books kept in GBP)
+Closing GBP/USD 1.350000, daily average 1.275479 over 2026-01-01 to 2026-12-31
+------------------------------------------------------------------------
+Account Name                      Basis               Debit       Credit
+1110    Bank                      closing          51300.00
+3100    Share Capital             historical                    12000.00
+4200    Consulting                average                       51019.18
+5300    Rent                      average          15305.75
+        Translation adjustment    residual                       3586.57
+------------------------------------------------------------------------
+        Total                                      66605.75     66605.75
+```
+
+Assets and liabilities at the **closing rate**: what is owned and owed exists on
+the balance sheet date, so it is worth what it is worth that day. Income and
+expenses at the **average rate** for the period: revenue earned across a year was
+not earned on 31 December, and translating it at the close would price a year of
+trading at one day's rate. Equity at the rate on the day each movement
+happened — share capital subscribed in 2025 was subscribed at the 2025 rate, and
+nothing since has changed what was put in.
+
+Three different rates has an arithmetic consequence: the translated columns no
+longer agree. That difference is the point of the exercise rather than a failure
+of it. It is the cumulative translation adjustment, it is an equity item and not
+a profit, and it gets a line a reader can point at. Folding it silently into
+retained earnings would be claiming the business made money it did not make.
+
+Every row says which basis it took, so any single line can be checked without
+recomputing the statement. Presenting into the currency the books are already
+kept in returns them unchanged and looks up no rates at all, which means a
+report can pass `--present` unconditionally. `--equity closing` exists for the
+case where the rate file does not reach as far back as the share capital does;
+it is wrong in principle and sometimes the only thing available, so it says
+`closing` in the basis column where it was used.
 
 ## Using it as a library
 

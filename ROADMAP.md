@@ -53,10 +53,24 @@ all disagree slightly.
       that proposes or applies, and a dashboard section showing what the current
       state of the review implies, recomputed as decisions are made.
 
-- [ ] **10 — Multi-currency.** Everything holds one currency at a time. A
-      business that invoices in euros and banks in sterling has a revaluation
-      problem the ledger can represent and nothing yet computes: rate sources,
-      the gain or loss on settlement, and a translation of the statements.
+- [x] **10 — Multi-currency.** A rate as an exact rational over bigints, and a
+      dated table that answers a pair directly, by inversion, or through the
+      shortest path of quoted currencies — on-or-before, with a staleness
+      bound, carrying its own provenance. A posting that records both what
+      moved and what it was booked at, with the balancing invariant staying in
+      the functional currency where it belongs. Retranslation at the close,
+      idempotent by construction and working per open item so that settling one
+      invoice out of several measures against what it is now carried at rather
+      than what it was booked at. Realised gain and loss on settlement, from a
+      rate, a table, or what the bank actually credited. And translation into a
+      presentation currency: closing rate for the balance sheet, average for the
+      P&L, historical for equity, and the residual named as a translation
+      adjustment rather than plugged into retained earnings.
+
+- [ ] **11 — Consolidation.** Translation restates one set of books. A group is
+      several, with intercompany balances that have to eliminate and minority
+      interests that do not. The ledger has no concept of an entity yet, and
+      adding one touches the chart, the reports and the document format.
 
 ## Current state
 
@@ -120,8 +134,9 @@ all disagree slightly.
 | `src/fx/settlement.ts` | Realised gain and loss, measured against what is carried |
 | `src/demo/foreign.ts` | A quarter with a euro customer and a dollar supplier |
 | `src/demo/foreignReport.ts` | That quarter closed, settled, and the arithmetic checked |
+| `src/fx/translate.ts` | The statements restated in a presentation currency |
 
-1150 tests across 46 files, typecheck clean.
+1420 tests across 59 files, typecheck clean.
 
 ## Known gaps
 
@@ -148,6 +163,22 @@ all disagree slightly.
   year of a small company, wrong for anything larger.
 - Ageing groups by reference alone, so an invoice and its credit note only
   net off when they share one. There is no counterparty dimension yet.
+- The dashboard knows nothing about foreign currency. It reconciles one bank
+  account in one currency, which is right for what it does, but there is no
+  view of what is exposed and no way to work through a revaluation in it.
+- Translation restates the trial balance. The income statement and balance
+  sheet renderers still read the functional-currency figures, so `--present`
+  prints a translated trial balance beside them rather than a translated set
+  of statements.
+- The translation adjustment is computed and shown but never posted. There is
+  no reserve account for it and no entry, so a translated balance sheet cannot
+  be loaded back in as a ledger.
+- A statement in a foreign currency cannot be reconciled. The matcher compares
+  amounts in one currency, so a euro bank account needs its own reconciliation
+  against a euro statement — which works, but nothing bridges the two.
+- The revaluation reads the whole ledger to find its open items, once per run.
+  Fine at a year of a small company, wrong for anything that has to close in
+  seconds.
 - Memory is keyed on the counterparty name and nothing else. Two suppliers whose
   names normalise to the same tokens share one entry, and a business that renames
   itself starts again from nothing.

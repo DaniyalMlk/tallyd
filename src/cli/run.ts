@@ -57,6 +57,12 @@ import type { ReconciliationResult } from "../reconcile/matcher.js";
 import { averageRate } from "../fx/average.js";
 import { exposures, renderExposures } from "../fx/exposure.js";
 import {
+  type Translation,
+  TranslationError,
+  renderTranslation,
+  translate,
+} from "../fx/translate.js";
+import {
   type RevaluationOptions,
   RevaluationError,
   renderRevaluation,
@@ -108,6 +114,12 @@ const COMMANDS: Record<string, { describe: string; flags: FlagSpecs }> = {
       from: { kind: "string", describe: "Start of the income statement period", placeholder: "date" },
       to: { kind: "string", describe: "End of the income statement period", placeholder: "date" },
       compare: { kind: "string", describe: "Comparative period, as from:to", placeholder: "a:b" },
+      present: { kind: "string", short: "p", describe: "Also present the trial balance in this currency", placeholder: "code" },
+      rates: { kind: "string", short: "r", describe: "Rate table for --present (JSON or CSV)", placeholder: "file" },
+      base: { kind: "string", short: "b", describe: "Base currency for a CSV of bare currency columns", placeholder: "code" },
+      equity: { kind: "string", describe: "Translate equity at historical (default) or closing rates", placeholder: "how" },
+      "average-method": { kind: "string", describe: "daily (default) or quoted, for the P&L rate", placeholder: "how" },
+      stale: { kind: "string", describe: "Days a quote may be behind the date asked for", placeholder: "days" },
     },
   },
   ageing: {
@@ -372,6 +384,36 @@ function reportCommand(environment: CliEnvironment, argv: readonly string[]): Cl
   const sheet = balanceSheet(ledger, asAt);
   const agrees = balances.balanced && sheet.balanced;
 
+  // The books stay in the currency they are kept in; presenting is an extra
+  // reading of them, printed alongside rather than instead.
+  const presentIn = stringFlag(parsed, "present");
+  let translated: Translation | undefined;
+  if (presentIn !== undefined) {
+    const equityText = stringFlag(parsed, "equity") ?? "historical";
+    if (equityText !== "historical" && equityText !== "closing") {
+      throw new ArgumentError(`--equity wants historical or closing, got "${equityText}"`);
+    }
+    const methodText = stringFlag(parsed, "average-method") ?? "daily";
+    if (methodText !== "daily" && methodText !== "quoted") {
+      throw new ArgumentError(`--average-method wants daily or quoted, got "${methodText}"`);
+    }
+    const rates =
+      stringFlag(parsed, "rates") === undefined ? RateTable.empty() : loadRates(environment, parsed);
+    try {
+      translated = translate(ledger, {
+        presentation: presentIn,
+        rates,
+        asAt,
+        period,
+        equityBasis: equityText,
+        averageMethod: methodText,
+      });
+    } catch (error) {
+      if (error instanceof TranslationError) throw new ArgumentError(error.message);
+      throw error;
+    }
+  }
+
   if (booleanFlag(parsed, "json")) {
     return {
       stdout: JSON.stringify(
@@ -394,6 +436,27 @@ function reportCommand(environment: CliEnvironment, argv: readonly string[]): Cl
             equity: sheet.equity.total.toDecimalString(),
             balanced: sheet.balanced,
           },
+          ...(translated === undefined
+            ? {}
+            : {
+                presented: {
+                  currency: translated.presentation.code,
+                  closingRate: translated.closingRate?.toDecimalString(10) ?? null,
+                  averageRate: translated.averageRate?.toDecimalString(10) ?? null,
+                  averageMethod: translated.averageMethod,
+                  translationAdjustment: translated.translationAdjustment.toDecimalString(),
+                  totalDebit: translated.totalDebit.toDecimalString(),
+                  totalCredit: translated.totalCredit.toDecimalString(),
+                  rows: translated.rows.map((row) => ({
+                    account: row.account,
+                    name: row.name,
+                    basis: row.basis,
+                    functional: row.functional.toDecimalString(),
+                    presentation: row.presentation.toDecimalString(),
+                    rate: row.effectiveRate?.toDecimalString(10) ?? null,
+                  })),
+                },
+              }),
         },
         null,
         2,
@@ -410,6 +473,7 @@ function reportCommand(environment: CliEnvironment, argv: readonly string[]): Cl
       renderIncomeStatement(profit),
       "",
       renderBalanceSheet(sheet),
+      ...(translated === undefined ? [] : ["", renderTranslation(translated)]),
     ].join("\n"),
     stderr: agrees ? "" : "The books do not agree; see the differences above.\n",
     code: agrees ? 0 : 2,
