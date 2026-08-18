@@ -58,3 +58,13 @@ export {
   applySettlement,
   settleForeignItem,
 } from "./settlement.js";
+
+export {
+  type RateBasis,
+  type TranslatedRow,
+  type Translation,
+  type TranslationOptions,
+  TranslationError,
+  renderTranslation,
+  translate,
+} from "./translate.js";
