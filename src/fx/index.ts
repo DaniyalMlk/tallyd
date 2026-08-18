@@ -31,3 +31,30 @@ export {
   ratesToDocument,
   ratesToJson,
 } from "./document.js";
+
+export {
+  type Exposure,
+  type ExposureOptions,
+  exposureFor,
+  exposureForReference,
+  exposures,
+  renderExposures,
+} from "./exposure.js";
+
+export {
+  type Revaluation,
+  type RevaluationLine,
+  type RevaluationOptions,
+  RevaluationError,
+  applyRevaluation,
+  renderRevaluation,
+  revalue,
+} from "./revaluation.js";
+
+export {
+  type Settlement,
+  type SettlementOptions,
+  SettlementError,
+  applySettlement,
+  settleForeignItem,
+} from "./settlement.js";
