@@ -1,0 +1,392 @@
+/**
+ * Taking back out what the group owes and sells to itself.
+ *
+ * Aggregation adds every controlled entity in full, so a group that lends
+ * itself a million pounds shows a million of assets and a million of
+ * liabilities that no outsider is party to, and a group that sells to itself
+ * shows revenue it never earned. Neither survives into a set of consolidated
+ * accounts: from outside, the group is one economic entity and it cannot owe
+ * itself anything.
+ *
+ * The model is a declaration rather than an inference. An account is
+ * intercompany because someone said so and because it names which entity it
+ * faces — there is nothing in a balance that reveals whether the person on the
+ * other end of it is inside the group. That forces one account per
+ * counterparty, which is the shape real groups use anyway: "owed by S", "owed
+ * by T", not one "intercompany" account whose balance is a net of three
+ * relationships that each have to be eliminated against a different set of
+ * books.
+ *
+ * The interesting part is that the two sides rarely agree. Money sent on the
+ * 30th and received on the 3rd sits in neither company's cash and in both
+ * companies' intercompany accounts on the wrong side; goods despatched and not
+ * received do the same; and two legs translated at rates that do not
+ * reciprocate disagree by a few pence for no reason anyone can act on. That
+ * residual is the finding. It is booked to a named account, reported with the
+ * pair that produced it, and never plugged into a total — a group whose
+ * intercompany accounts are out by six figures has a problem, and a
+ * consolidation that made the number disappear would be hiding it.
+ */
+
+import { Money, sumMoney } from "../money/money.js";
+import type { Currency } from "../money/currency.js";
+import type { ChartOfAccounts } from "../accounts/chart.js";
+import type { AccountType } from "../accounts/types.js";
+import { JournalEntry } from "../ledger/entry.js";
+import type { Aggregation } from "./aggregate.js";
+import { GROUP_ACCOUNTS } from "./accounts.js";
+import { GroupError, type GroupStructure } from "./structure.js";
+
+/** One entity's side of an intercompany relationship. */
+export interface IntercompanyDeclaration {
+  /** Whose books the account is in. */
+  entity: string;
+  /** The account code in those books. */
+  account: string;
+  /** The entity on the other end of it. */
+  counterparty: string;
+  /**
+   * Which relationship this account is part of.
+   *
+   * A pair of entities usually has more than one thing running between them —
+   * a loan and a trading account at least — and (entity, counterparty) is not
+   * enough to say which account faces which. The link is the name of the
+   * relationship, and both sides of a pair must use the same one.
+   *
+   * Left out, it defaults to whether the account is a balance sheet or a
+   * profit and loss item, which pairs a receivable with a payable and sales
+   * with purchases without anybody having to say so. Two loans between the
+   * same two companies need naming.
+   */
+  link?: string;
+  /** Free text carried through to the elimination entry's narration. */
+  note?: string;
+}
+
+export interface IntercompanySide {
+  readonly entity: string;
+  readonly account: string;
+  readonly counterparty: string;
+  readonly name: string;
+  readonly type: AccountType | null;
+  /** The balance as that entity's own books hold it. */
+  readonly functional: Money;
+  /** The same balance in the group's presentation currency. */
+  readonly presentation: Money;
+  /** The relationship this side belongs to; both sides of a pair share it. */
+  readonly link: string;
+  readonly note: string;
+}
+
+export type PairKind = "balance-sheet" | "profit-and-loss" | "mixed";
+
+export interface IntercompanyPair {
+  /** The two sides, ordered by entity code so a pair reads the same way twice. */
+  readonly sides: readonly [IntercompanySide, IntercompanySide];
+  readonly kind: PairKind;
+  /**
+   * What the two come to together. Zero when they agree. Positive means the
+   * group is carrying more asset (or expense) than liability (or income).
+   */
+  readonly difference: Money;
+  readonly agrees: boolean;
+}
+
+/** A side with nothing facing it. */
+export interface UnmatchedDeclaration {
+  readonly side: IntercompanySide;
+  readonly reason: string;
+}
+
+export interface EliminationOptions {
+  /** Where a difference between two sides goes. Defaults to items in transit. */
+  differenceAccount?: string;
+  /** Chart the elimination entries are validated against. */
+  chart?: ChartOfAccounts;
+  /** Prefix for the generated entry ids. */
+  idPrefix?: string;
+  /**
+   * Treat a difference smaller than this as agreement, booking it to the
+   * difference account without flagging the pair. Rounding a translated
+   * balance to whole pence can leave a penny that means nothing.
+   */
+  tolerance?: Money;
+}
+
+export interface Eliminations {
+  readonly presentation: Currency;
+  readonly pairs: readonly IntercompanyPair[];
+  readonly unmatched: readonly UnmatchedDeclaration[];
+  /** The pairs whose two sides did not agree. */
+  readonly disagreements: readonly IntercompanyPair[];
+  /** The elimination entries, one per pair. */
+  readonly entries: readonly JournalEntry[];
+  /** Everything routed to the difference account, in total. */
+  readonly totalDifference: Money;
+  /** Gross intercompany balances removed, measured on the debit side. */
+  readonly totalEliminated: Money;
+}
+
+function key(...parts: readonly string[]): string {
+  return parts.join(" ");
+}
+
+function classOf(type: AccountType | null): "balance-sheet" | "profit-and-loss" {
+  return type === "income" || type === "expense" ? "profit-and-loss" : "balance-sheet";
+}
+
+/**
+ * Read the declared balances out of an aggregation.
+ *
+ * The aggregation already holds every entity's translated trial balance, so
+ * nothing is recomputed here and the eliminations are guaranteed to be against
+ * the same figures that were added up.
+ */
+export function intercompanyBalances(
+  group: GroupStructure,
+  aggregation: Aggregation,
+  declarations: readonly IntercompanyDeclaration[],
+): readonly IntercompanySide[] {
+  const zero = Money.zero(aggregation.presentation);
+  const seen = new Set<string>();
+  const sides: IntercompanySide[] = [];
+
+  for (const declaration of declarations) {
+    const { entity, account, counterparty } = declaration;
+    if (entity === counterparty) {
+      throw new GroupError(`${entity} cannot be its own counterparty (account ${account})`);
+    }
+    if (!group.has(entity)) {
+      throw new GroupError(`Intercompany declaration names ${entity}, which is not in the group`);
+    }
+    if (!group.has(counterparty)) {
+      throw new GroupError(
+        `Intercompany declaration in ${entity} names ${counterparty} as counterparty, ` +
+          `which is not in the group`,
+      );
+    }
+    const id = key(entity, account);
+    if (seen.has(id)) {
+      throw new GroupError(
+        `Account ${account} in ${entity} is declared intercompany twice. One account faces ` +
+          `one counterparty; split the balance if it faces more.`,
+      );
+    }
+    seen.add(id);
+
+    const contribution = aggregation.entities.find((c) => c.entity === entity);
+    if (contribution === undefined) {
+      // Declared against an entity that is not being consolidated. Not an
+      // error — an associate's balances stay where they are — but there is
+      // nothing to eliminate, and saying so beats silently dropping it.
+      continue;
+    }
+    const row = contribution.translation.rows.find((r) => r.account === account);
+    sides.push(
+      Object.freeze({
+        entity,
+        account,
+        counterparty,
+        name: row?.name ?? account,
+        type: row?.type ?? null,
+        functional: row?.functional ?? Money.zero(contribution.functional),
+        presentation: row?.presentation ?? zero,
+        link: declaration.link ?? classOf(row?.type ?? null),
+        note: declaration.note ?? "",
+      }),
+    );
+  }
+  return Object.freeze(sides);
+}
+
+function kindOf(a: IntercompanySide, b: IntercompanySide): PairKind {
+  const left = classOf(a.type);
+  const right = classOf(b.type);
+  return left === right ? left : "mixed";
+}
+
+/**
+ * Pair the declarations up and produce the entries that remove them.
+ *
+ * Each entry reverses both sides and books whatever is left to the difference
+ * account, so it balances by construction and the combined trial balance
+ * balances after it as it did before.
+ */
+export function eliminateIntercompany(
+  group: GroupStructure,
+  aggregation: Aggregation,
+  declarations: readonly IntercompanyDeclaration[],
+  options: EliminationOptions = {},
+): Eliminations {
+  const presentation = aggregation.presentation;
+  const zero = Money.zero(presentation);
+  const differenceAccount = options.differenceAccount ?? GROUP_ACCOUNTS.itemsInTransit;
+  const prefix = options.idPrefix ?? "ELIM";
+  const tolerance = options.tolerance ?? zero;
+
+  const sides = intercompanyBalances(group, aggregation, declarations);
+
+  // Keyed on the relationship and not just the two entities: a loan account
+  // and a trading account both face the same counterparty, and pairing on the
+  // entities alone would match the loan against the purchases.
+  const byPair = new Map<string, IntercompanySide>();
+  for (const side of sides) {
+    const id = key(side.entity, side.counterparty, side.link);
+    if (byPair.has(id)) {
+      throw new GroupError(
+        `${side.entity} has two accounts facing ${side.counterparty} on the same "${side.link}" ` +
+          `relationship (${(byPair.get(id) as IntercompanySide).account} and ${side.account}). ` +
+          `Name the relationships with "link" so each side knows what it pairs with.`,
+      );
+    }
+    byPair.set(id, side);
+  }
+
+  const pairs: IntercompanyPair[] = [];
+  const unmatched: UnmatchedDeclaration[] = [];
+  const handled = new Set<IntercompanySide>();
+
+  for (const side of sides) {
+    if (handled.has(side)) continue;
+    const mirror = byPair.get(key(side.counterparty, side.entity, side.link));
+    if (mirror === undefined || handled.has(mirror)) {
+      unmatched.push(
+        Object.freeze({
+          side,
+          reason:
+            mirror === undefined
+              ? `${side.counterparty} declares no "${side.link}" account facing ${side.entity}`
+              : `${side.counterparty}'s "${side.link}" account facing ${side.entity} is already paired`,
+        }),
+      );
+      handled.add(side);
+      continue;
+    }
+    handled.add(side);
+    handled.add(mirror);
+    const ordered: readonly [IntercompanySide, IntercompanySide] =
+      side.entity.localeCompare(mirror.entity) <= 0 ? [side, mirror] : [mirror, side];
+    const difference = ordered[0].presentation.plus(ordered[1].presentation);
+    pairs.push(
+      Object.freeze({
+        sides: ordered,
+        kind: kindOf(ordered[0], ordered[1]),
+        difference,
+        agrees: difference.abs().lessThanOrEqual(tolerance) || difference.isZero,
+      }),
+    );
+  }
+
+  pairs.sort((a, b) => {
+    const byEntity = a.sides[0].entity.localeCompare(b.sides[0].entity);
+    if (byEntity !== 0) return byEntity;
+    return a.sides[0].account.localeCompare(b.sides[0].account);
+  });
+
+  const entries: JournalEntry[] = [];
+  let sequence = 0;
+  for (const pair of pairs) {
+    const [first, second] = pair.sides;
+    if (first.presentation.isZero && second.presentation.isZero) continue;
+    sequence += 1;
+    const postings = [
+      {
+        account: first.account,
+        amount: first.presentation.negated(),
+        memo: `${first.entity} facing ${first.counterparty}`,
+      },
+      {
+        account: second.account,
+        amount: second.presentation.negated(),
+        memo: `${second.entity} facing ${second.counterparty}`,
+      },
+    ];
+    if (!pair.difference.isZero) {
+      postings.push({
+        account: differenceAccount,
+        amount: pair.difference,
+        memo: `${first.entity}/${second.entity} do not agree`,
+      });
+    }
+    entries.push(
+      JournalEntry.create(
+        {
+          id: `${prefix}-${String(sequence).padStart(3, "0")}`,
+          date: aggregation.asAt,
+          narration:
+            `Eliminate ${first.entity}/${second.entity} intercompany` +
+            (first.note === "" ? "" : ` — ${first.note}`),
+          postings,
+          tags: ["consolidation", "intercompany"],
+        },
+        options.chart,
+      ),
+    );
+  }
+
+  // Measured on the debit side of the pairs actually removed. An unpaired
+  // declaration is not eliminated, so it does not count towards this.
+  const totalEliminated = sumMoney(
+    pairs
+      .flatMap((p) => [...p.sides])
+      .filter((s) => s.presentation.isPositive)
+      .map((s) => s.presentation),
+    presentation,
+  );
+
+  return Object.freeze({
+    presentation,
+    pairs: Object.freeze(pairs),
+    unmatched: Object.freeze(unmatched),
+    disagreements: Object.freeze(pairs.filter((p) => !p.agrees)),
+    entries: Object.freeze(entries),
+    totalDifference: sumMoney(
+      pairs.map((p) => p.difference),
+      presentation,
+    ),
+    totalEliminated,
+  });
+}
+
+export function renderEliminations(result: Eliminations): string {
+  const lines: string[] = [];
+  lines.push(
+    `Intercompany eliminations — ${result.pairs.length} ` +
+      `${result.pairs.length === 1 ? "pair" : "pairs"}, ` +
+      `${result.totalEliminated.toDecimalString()} ${result.presentation.code} removed`,
+  );
+  lines.push("-".repeat(96));
+  for (const pair of result.pairs) {
+    const [a, b] = pair.sides;
+    lines.push(
+      `${a.entity} ${a.account} ${a.name}`.padEnd(40) +
+        a.presentation.toDecimalString().padStart(14) +
+        `  ${pair.kind}`,
+    );
+    lines.push(
+      `${b.entity} ${b.account} ${b.name}`.padEnd(40) + b.presentation.toDecimalString().padStart(14),
+    );
+    if (pair.agrees) {
+      lines.push("  agrees".padEnd(40) + "".padStart(14));
+    } else {
+      const larger = pair.difference.isPositive ? a : b;
+      lines.push(
+        `  out by ${pair.difference.abs().toDecimalString()} — ${larger.entity}'s side is the larger`,
+      );
+    }
+  }
+  for (const item of result.unmatched) {
+    lines.push(
+      `UNPAIRED ${item.side.entity} ${item.side.account} ` +
+        `${item.side.presentation.toDecimalString()} — ${item.reason}`,
+    );
+  }
+  if (!result.totalDifference.isZero) {
+    lines.push("-".repeat(96));
+    lines.push(
+      `${result.totalDifference.toDecimalString()} ${result.presentation.code} of differences, ` +
+        `carried as items in transit rather than plugged.`,
+    );
+  }
+  return lines.join("\n");
+}
