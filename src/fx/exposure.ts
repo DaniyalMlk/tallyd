@@ -212,7 +212,7 @@ export function openItems(ledger: Ledger, options: ExposureOptions = {}): readon
       if (currency === undefined || currency.code === functional) continue;
 
       const reference = entry.referenceFor(posting);
-      const key = `${posting.account} ${reference ?? ""}`;
+      const key = `${posting.account}\u0000${reference ?? ""}`;
       let state = running.get(key);
       if (state === undefined) {
         state = {
