@@ -392,6 +392,57 @@ describe("what a declaration may not say", () => {
   });
 });
 
+describe("what the group looks like afterwards", () => {
+  it("leaves nothing of the intercompany balances in the combined figures", () => {
+    const aggregation = combined();
+    const result = eliminateIntercompany(GROUP, aggregation, DECLARATIONS, { chart: GBP_CHART });
+    const after = new Map<string, Money>();
+    for (const row of aggregation.rows) after.set(row.account, row.total);
+    for (const posting of result.entries.flatMap((e) => e.postings)) {
+      after.set(
+        posting.account,
+        (after.get(posting.account) ?? Money.zero(GBP)).plus(posting.amount),
+      );
+    }
+    expect(after.get("1190")!.isZero).toBe(true);
+    expect(after.get("2190")!.isZero).toBe(true);
+    expect(after.get("4950")!.isZero).toBe(true);
+    expect(after.get("5960")!.isZero).toBe(true);
+    // Third-party capital and cash are untouched.
+    expect(after.get("3100")!.toDecimalString()).toBe("-260000.00");
+  });
+
+  it("moves the difference into transit and leaves the group still balanced", () => {
+    const aggregation = combined({ transitEur: "6250.00" });
+    const result = eliminateIntercompany(GROUP, aggregation, DECLARATIONS, { chart: GBP_CHART });
+    const after = new Map<string, Money>();
+    for (const row of aggregation.rows) after.set(row.account, row.total);
+    for (const posting of result.entries.flatMap((e) => e.postings)) {
+      after.set(
+        posting.account,
+        (after.get(posting.account) ?? Money.zero(GBP)).plus(posting.amount),
+      );
+    }
+    expect(after.get("1190")!.isZero).toBe(true);
+    expect(after.get("1195")!.toDecimalString()).toBe("5000.00");
+    const residual = [...after.values()].reduce((a, b) => a.plus(b), Money.zero(GBP));
+    expect(residual.negated().equals(aggregation.translationAdjustment)).toBe(true);
+  });
+
+  it("calls a pair mixed when the two sides are not the same kind of account", () => {
+    const result = eliminateIntercompany(
+      GROUP,
+      combined(),
+      [
+        { entity: "P", account: "1190", counterparty: "S", link: "odd" },
+        { entity: "S", account: "5960", counterparty: "P", link: "odd" },
+      ],
+      { chart: GBP_CHART },
+    );
+    expect(result.pairs[0]?.kind).toBe("mixed");
+  });
+});
+
 describe("rendering", () => {
   it("summarises the pairs and what was removed", () => {
     const text = renderEliminations(
