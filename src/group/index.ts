@@ -11,6 +11,23 @@ export {
 } from "./structure.js";
 export { CONSOLIDATION_ACCOUNTS, GROUP_ACCOUNTS, groupChart } from "./accounts.js";
 export {
+  type Acquisition,
+  type AcquisitionInput,
+  type AcquisitionOptions,
+  type NciMeasurement,
+  acquisitionOf,
+  acquisitions,
+  netAssets,
+  renderAcquisition,
+} from "./acquisition.js";
+export {
+  type Consolidation,
+  type ConsolidationOptions,
+  type SubsidiaryWorking,
+  consolidate,
+  renderConsolidation,
+} from "./consolidate.js";
+export {
   type EliminationOptions,
   type Eliminations,
   type IntercompanyDeclaration,
