@@ -55,6 +55,12 @@ import {
 import type { BookLine } from "../reconcile/bankView.js";
 import type { ReconciliationResult } from "../reconcile/matcher.js";
 import { averageRate } from "../fx/average.js";
+import { GroupDocumentError, groupFromJson } from "../group/document.js";
+import { renderAggregation } from "../group/aggregate.js";
+import { renderEliminations } from "../group/intercompany.js";
+import { renderAcquisition } from "../group/acquisition.js";
+import { consolidate, renderConsolidation } from "../group/consolidate.js";
+import { GroupError } from "../group/structure.js";
 import { exposures, renderExposures } from "../fx/exposure.js";
 import {
   type Translation,
@@ -242,6 +248,22 @@ const COMMANDS: Record<string, { describe: string; flags: FlagSpecs }> = {
       exclude: { kind: "string", describe: "Accounts to leave alone, comma-separated", placeholder: "a,b" },
       stale: { kind: "string", describe: "Days a quote may be behind the closing date", placeholder: "days" },
       show: { kind: "boolean", describe: "Print the exposures and stop, without revaluing" },
+      json: { kind: "boolean", describe: "Emit JSON instead of text" },
+    },
+  },
+  consolidate: {
+    describe: "Consolidate a group of companies into one set of accounts",
+    flags: {
+      group: { kind: "string", short: "g", describe: "Group document (JSON)", placeholder: "file" },
+      rates: { kind: "string", short: "r", describe: "Rate table (JSON or CSV)", placeholder: "file" },
+      base: { kind: "string", short: "b", describe: "Base currency for a CSV of bare currency columns", placeholder: "code" },
+      "as-at": { kind: "string", describe: "Reporting date (default: the group document's)", placeholder: "date" },
+      from: { kind: "string", describe: "Start of the reporting period", placeholder: "date" },
+      to: { kind: "string", describe: "End of the reporting period", placeholder: "date" },
+      show: { kind: "string", describe: "workings (default), combined, eliminations, statements or all", placeholder: "what" },
+      "average-method": { kind: "string", describe: "daily (default) or quoted, for the P&L rate", placeholder: "how" },
+      stale: { kind: "string", describe: "Days a quote may be behind the date asked for", placeholder: "days" },
+      out: { kind: "string", short: "o", describe: "Write the consolidated ledger as a document", placeholder: "file" },
       json: { kind: "boolean", describe: "Emit JSON instead of text" },
     },
   },
@@ -1530,6 +1552,208 @@ function revalueCommand(environment: CliEnvironment, argv: readonly string[]): C
   return { stdout: lines.join("\n"), stderr: "", code: 0 };
 }
 
+/**
+ * Consolidate a group.
+ *
+ * The group document says who holds whom, where each company's books are, what
+ * faces what across the group, and what was paid for each subsidiary. This
+ * reads all of it, does the work, and prints as much of the working as asked
+ * for — because the number a reader will want to argue with is never the
+ * consolidated total, it is one of the figures that went into it.
+ *
+ * Exit code 2 when the consolidated ledger does not balance or its accounting
+ * equation leaves a residual: a consolidation that came out wrong ran to
+ * completion, and a job that treated that as a pass would be worse than none.
+ */
+function consolidateCommand(environment: CliEnvironment, argv: readonly string[]): CliResult {
+  const parsed = parseArgs(argv, (COMMANDS["consolidate"] as { flags: FlagSpecs }).flags);
+  const groupPath = requiredFlag(parsed, "group");
+
+  let group;
+  try {
+    group = groupFromJson(environment.readFile(groupPath));
+  } catch (error) {
+    if (error instanceof GroupDocumentError || error instanceof GroupError) {
+      throw new ArgumentError(error.message);
+    }
+    throw error;
+  }
+
+  const missing = group.structure
+    .consolidated()
+    .filter((entity) => !group.ledgers.has(entity.code));
+  if (missing.length > 0) {
+    throw new ArgumentError(
+      `${missing.map((e) => e.code).join(", ")} ${missing.length === 1 ? "has" : "have"} no ` +
+        `"ledger" in ${groupPath}, so there are no books to consolidate.`,
+    );
+  }
+
+  const ledgers = new Map<string, Ledger>();
+  for (const entity of group.structure.consolidated()) {
+    ledgers.set(entity.code, loadLedger(environment, group.ledgers.get(entity.code) as string));
+  }
+
+  const rates = stringFlag(parsed, "rates") === undefined
+    ? RateTable.empty()
+    : loadRates(environment, parsed);
+  if (!group.structure.isSingleCurrency && stringFlag(parsed, "rates") === undefined) {
+    throw new ArgumentError(
+      `The group keeps books in ${group.structure.currencies().join(", ")}, so it needs --rates.`,
+    );
+  }
+
+  const asAtText = stringFlag(parsed, "as-at") ?? group.asAt;
+  if (asAtText === null || asAtText === undefined) {
+    throw new ArgumentError("A consolidation needs a reporting date: pass --as-at or set asAt.");
+  }
+  const asAt = date(asAtText);
+
+  const fromText = stringFlag(parsed, "from");
+  const toText = stringFlag(parsed, "to");
+  const period =
+    fromText !== undefined || toText !== undefined
+      ? dateRange(fromText ?? String(asAt), toText ?? String(asAt))
+      : (group.period ?? undefined);
+
+  const methodText = stringFlag(parsed, "average-method") ?? group.averageMethod ?? undefined;
+  if (methodText !== undefined && methodText !== "daily" && methodText !== "quoted") {
+    throw new ArgumentError(`--average-method wants daily or quoted, got "${methodText}"`);
+  }
+
+  let result;
+  try {
+    result = consolidate(group.structure, ledgers, {
+      rates,
+      asAt: String(asAt),
+      ...(period === undefined ? {} : { period }),
+      ...(methodText === undefined ? {} : { averageMethod: methodText }),
+      ...(group.equityBasis === null ? {} : { equityBasis: group.equityBasis }),
+      intercompany: group.intercompany,
+      acquisitions: group.acquisitions,
+    });
+  } catch (error) {
+    if (error instanceof GroupError) throw new ArgumentError(error.message);
+    throw error;
+  }
+
+  const code = result.balanced && result.residual.isZero ? 0 : 2;
+
+  let written: string | undefined;
+  const outPath = stringFlag(parsed, "out");
+  if (outPath !== undefined) {
+    if (environment.writeFile === undefined) {
+      throw new ArgumentError("This environment cannot write files, so --out has nowhere to go.");
+    }
+    environment.writeFile(outPath, ledgerToJson(result.ledger));
+    written = outPath;
+  }
+
+  if (booleanFlag(parsed, "json")) {
+    return {
+      stdout: JSON.stringify(
+        {
+          group: result.group.name,
+          presentation: result.presentation.code,
+          asAt: result.asAt,
+          entities: result.group.consolidated().map((entity) => ({
+            code: entity.code,
+            name: entity.name,
+            currency: entity.currency.code,
+            effectiveInterest: entity.effective.toJSON(),
+            nonControllingInterest: entity.nonControlling.toJSON(),
+          })),
+          notConsolidated: result.aggregation.excluded,
+          workings: result.workings.map((working) => ({
+            entity: working.entity,
+            acquired: working.acquisition.acquired,
+            measurement: working.acquisition.measurement,
+            consideration: working.acquisition.consideration.toDecimalString(),
+            netAssetsAcquired: working.acquisition.netAssetsAcquired.toDecimalString(),
+            goodwill: working.acquisition.goodwill.toDecimalString(),
+            bargainGain: working.acquisition.bargainGain.toDecimalString(),
+            netAssetsNow: working.netAssetsNow.toDecimalString(),
+            profitForPeriod: working.profitForPeriod.toDecimalString(),
+            nciProfitShare: working.nciProfitShare.toDecimalString(),
+            nciClosing: working.nciClosing.toDecimalString(),
+            postAcquisitionReserves: working.postAcquisitionReserves.toDecimalString(),
+          })),
+          intercompany: {
+            pairs: result.eliminations.pairs.length,
+            eliminated: result.eliminations.totalEliminated.toDecimalString(),
+            difference: result.eliminations.totalDifference.toDecimalString(),
+            unpaired: result.eliminations.unmatched.map((item) => ({
+              entity: item.side.entity,
+              account: item.side.account,
+              reason: item.reason,
+            })),
+          },
+          goodwill: result.goodwill.toDecimalString(),
+          nonControllingInterest: result.nonControllingInterest.toDecimalString(),
+          translationReserve: result.translationReserve.toDecimalString(),
+          investmentResidual: result.investmentResidual.toDecimalString(),
+          residual: result.residual.toDecimalString(),
+          balanced: result.balanced,
+          ...(written === undefined ? {} : { written }),
+        },
+        null,
+        2,
+      ),
+      stderr: "",
+      code,
+    };
+  }
+
+  const show = stringFlag(parsed, "show") ?? "workings";
+  const known = ["workings", "combined", "eliminations", "statements", "all"];
+  if (!known.includes(show)) {
+    throw new ArgumentError(`--show wants one of ${known.join(", ")}, got "${show}"`);
+  }
+  const wants = (name: string): boolean => show === "all" || show === name;
+
+  const sections: string[] = [];
+  sections.push(result.group.render());
+  sections.push("");
+  if (wants("combined")) {
+    sections.push(renderAggregation(result.aggregation));
+    sections.push("");
+  }
+  if (wants("eliminations") && result.eliminations.pairs.length + result.eliminations.unmatched.length > 0) {
+    sections.push(renderEliminations(result.eliminations));
+    sections.push("");
+  }
+  if (wants("workings")) {
+    for (const working of result.workings) {
+      sections.push(renderAcquisition(working.acquisition));
+      sections.push("");
+    }
+  }
+  sections.push(renderConsolidation(result));
+  if (wants("statements")) {
+    sections.push("");
+    sections.push(renderTrialBalance(result.trialBalance));
+    sections.push("");
+    sections.push(
+      renderIncomeStatement(
+        incomeStatement(result.ledger, result.period, { currency: result.presentation }),
+      ),
+    );
+    sections.push("");
+    sections.push(
+      renderBalanceSheet(balanceSheet(result.ledger, result.asAt, { currency: result.presentation })),
+    );
+  }
+  if (written !== undefined) {
+    sections.push("");
+    sections.push(`Wrote the consolidated ledger to ${written}.`);
+  }
+  return {
+    stdout: sections.join("\n"),
+    stderr: code === 0 ? "" : "The consolidated ledger does not agree with itself.\n",
+    code,
+  };
+}
+
 const HANDLERS: Record<string, (environment: CliEnvironment, argv: readonly string[]) => CliResult> = {
   report: reportCommand,
   ageing: ageingCommand,
@@ -1541,6 +1765,7 @@ const HANDLERS: Record<string, (environment: CliEnvironment, argv: readonly stri
   learn: learnCommand,
   rates: ratesCommand,
   revalue: revalueCommand,
+  consolidate: consolidateCommand,
   dashboard: dashboardCommand,
   post: postCommand,
 };
