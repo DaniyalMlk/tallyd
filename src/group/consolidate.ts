@@ -194,12 +194,22 @@ export function consolidate(
   const zero = Money.zero(presentation);
   const rounding = options.rounding ?? "half-even";
 
+  // The investment accounts are held at the rate on the day the shares were
+  // bought. A euro investment retranslated at the closing rate would fail to
+  // eliminate against the price that was paid for it, and the shortfall would
+  // sit in the consolidated balance sheet looking like an investment in a
+  // company nobody could name.
+  const investmentAccounts = new Set<string>([
+    GROUP_ACCOUNTS.investment,
+    ...(options.acquisitions ?? []).map((a) => a.investmentAccount ?? GROUP_ACCOUNTS.investment),
+  ]);
   const aggregationOptions: AggregationOptions = {
     rates: options.rates,
     asAt: options.asAt,
     ...(options.period === undefined ? {} : { period: options.period }),
     ...(options.averageMethod === undefined ? {} : { averageMethod: options.averageMethod }),
     ...(options.equityBasis === undefined ? {} : { equityBasis: options.equityBasis }),
+    historicalAccounts: [...investmentAccounts],
     rounding,
   };
   const aggregation = aggregate(group, ledgers, aggregationOptions);
