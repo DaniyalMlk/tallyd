@@ -35,7 +35,9 @@ export const GROUP_ACCOUNTS = {
   translationReserve: "3250",
   nonControllingInterest: "3400",
   intercompanySales: "4950",
+  bargainGain: "4960",
   intercompanyPurchases: "5960",
+  nciProfitShare: "3410",
 } as const;
 
 export const CONSOLIDATION_ACCOUNTS: readonly AccountDefinition[] = [
@@ -99,6 +101,20 @@ export const CONSOLIDATION_ACCOUNTS: readonly AccountDefinition[] = [
     name: "Intercompany Purchases",
     type: "expense",
     parent: "5000",
+  },
+  {
+    code: GROUP_ACCOUNTS.nciProfitShare,
+    name: "Profit Attributable to Non-controlling Interest",
+    type: "equity",
+    parent: "3000",
+    description: "An allocation of the group's result, not a cost of earning it",
+  },
+  {
+    code: GROUP_ACCOUNTS.bargainGain,
+    name: "Gain on a Bargain Purchase",
+    type: "income",
+    parent: "4000",
+    description: "Net assets acquired above what was paid for them",
   },
 ];
 
