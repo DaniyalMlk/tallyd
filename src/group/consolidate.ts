@@ -32,6 +32,15 @@
  * assets now, plus whatever goodwill was attributed to it at acquisition. That
  * needs no roll-forward from one period to the next and so cannot drift, which
  * a schedule of movements can.
+ *
+ * One assumption is worth stating outright, because it is inherited from the
+ * translation and is easy to walk past: the income and expense balances in an
+ * entity's trial balance are taken to be the reporting period's result. That
+ * is true of books closed to retained earnings at each year end and false of
+ * books that have never been closed, where the profit and loss accounts have
+ * been accumulating since the company was formed. Such books would be
+ * translated at this period's average rate and would hand the outside stake a
+ * share of every year's profit at once.
  */
 
 import { Money, sumMoney } from "../money/money.js";
