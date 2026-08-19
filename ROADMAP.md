@@ -12,6 +12,10 @@ all disagree slightly.
   boundary, not by a validation pass afterwards.
 - The reconciliation engine must explain itself: every match carries a score and
   the reasons behind it, so a human reviewing the queue can see why.
+- A consolidation must explain itself the same way: every adjustment is a
+  balanced journal entry with a narration, never a figure applied to a total.
+- Ownership is an exact fraction. It gets multiplied down chains and then
+  multiplied by money, and a rounded percentage becomes pence nobody can trace.
 - No paid APIs. Demo data is generated deterministically.
 
 ## Phases
@@ -67,10 +71,29 @@ all disagree slightly.
       P&L, historical for equity, and the residual named as a translation
       adjustment rather than plugged into retained earnings.
 
-- [ ] **11 — Consolidation.** Translation restates one set of books. A group is
-      several, with intercompany balances that have to eliminate and minority
-      interests that do not. The ledger has no concept of an entity yet, and
-      adding one touches the chart, the reports and the document format.
+- [x] **11 — Consolidation.** An ownership interest as an exact fraction over
+      bigints, and a holding graph rather than a tree, so a company held from
+      two places comes out at the sum over both paths. Control and ownership
+      settled separately: a company held 80% of a company held 75% consolidates
+      in full and carries a 40% interest belonging to shareholders outside the
+      group. Every controlled entity's books translated and added in full, each
+      entity's translation adjustment kept apart from the others. Intercompany
+      balances declared from both ends and paired on the relationship, with the
+      residual — cash in transit, goods in transit, rates that do not
+      reciprocate — carried in a named account rather than plugged, and a
+      one-sided declaration reported instead of eliminated. Goodwill from the
+      consideration, the non-controlling interest at acquisition measured
+      proportionately or at fair value, and a bargain purchase as a gain rather
+      than a negative asset. The whole thing assembled into a ledger in the
+      presentation currency, one balanced entry per step, that every existing
+      report reads and that serialises and loads back.
+
+- [ ] **12 — Consolidating over time.** A consolidation is prepared every period
+      and each one currently starts from nothing. The comparatives, the movement
+      in the non-controlling interest and in the translation reserve, and a
+      group that acquires or disposes of a company part-way through a year are
+      all questions about two dates rather than one, and none of them can be
+      answered by a report that only knows about the reporting date.
 
 ## Current state
 
@@ -135,8 +158,18 @@ all disagree slightly.
 | `src/demo/foreign.ts` | A quarter with a euro customer and a dollar supplier |
 | `src/demo/foreignReport.ts` | That quarter closed, settled, and the arithmetic checked |
 | `src/fx/translate.ts` | The statements restated in a presentation currency |
+| `src/group/interest.ts` | An ownership interest as an exact fraction over bigints |
+| `src/group/structure.ts` | The holding graph: effective interest, control, what is left out |
+| `src/group/accounts.ts` | The accounts that exist only when there is more than one company |
+| `src/group/aggregate.ts` | Every controlled entity translated and added, in full |
+| `src/group/intercompany.ts` | Declared balances paired, eliminated, and the residual named |
+| `src/group/acquisition.ts` | Goodwill, the outside stake, and a bargain purchase |
+| `src/group/consolidate.ts` | The consolidation, assembled into a ledger |
+| `src/group/document.ts` | The group document, validated on the way in |
+| `src/demo/group.ts` | Three companies in three currencies, one held through another |
+| `src/demo/groupReport.ts` | That group consolidated, with the split checked at the end |
 
-1420 tests across 59 files, typecheck clean.
+1611 tests across 66 files, typecheck clean.
 
 ## Known gaps
 
@@ -191,6 +224,32 @@ all disagree slightly.
   invoices, a supplier run, card takings and payroll. It says nothing about
   books with foreign currency, intercompany transfers or a credit-card control
   account, so the benchmark numbers describe that shape and not every shape.
+- Unrealised profit on goods one group company has sold to another and which
+  are still in stock is not eliminated. The trading is taken out and the margin
+  sitting inside the buyer's inventory is not, so consolidated stock is carried
+  at what the group charged itself rather than at what it cost.
+- An associate is identified and then left alone. It is neither consolidated nor
+  equity accounted, so a 30% holding shows in the group's books at whatever the
+  investment cost and nothing of its results reaches the consolidated income
+  statement.
+- Goodwill is measured once and never impaired, and it is carried at the
+  acquisition-date rate rather than retranslated at the closing rate as goodwill
+  arising on a foreign operation should be.
+- Fair value adjustments on acquisition can only be given as a single figure for
+  the net assets acquired. There is no way to say which asset was written up, so
+  nothing depreciates the uplift afterwards.
+- Indirect holdings use the direct method: goodwill on a company held through a
+  subsidiary is measured against what the subsidiary paid, in full. The
+  alternative treatment, which scales that cost by the group's interest in the
+  buyer, is not available.
+- The income and expense balances in an entity's trial balance are taken to be
+  the reporting period's result, which is true of books closed to retained
+  earnings each year end and false of books that have never been closed.
+- One consolidation, one date. There are no comparatives, no movement schedule
+  for the non-controlling interest or the translation reserve, and no way to
+  express a company acquired or sold part-way through the period.
+- The dashboard knows nothing about groups. It reconciles one bank account for
+  one company, which is what it is for, but there is no view of a consolidation.
 - The matcher still holds both sides in memory. A year of a busy account
   reconciles in about a fifth of a second, but books where hundreds of movements
   share one amount and one date collapse into a single graph component and get
