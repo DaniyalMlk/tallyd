@@ -86,6 +86,12 @@ export interface AggregationOptions {
   period?: DateRange;
   averageMethod?: AverageMethod;
   equityBasis?: "historical" | "closing";
+  /**
+   * Accounts to hold at the rate on the day each movement happened. The
+   * investment in a subsidiary belongs here: it is carried at what was paid,
+   * and what was paid is a fact about the day of the purchase.
+   */
+  historicalAccounts?: readonly string[];
   rounding?: RoundingMode;
   includeZero?: boolean;
 }
@@ -138,6 +144,9 @@ export function aggregate(
       ...(options.period === undefined ? {} : { period: options.period }),
       ...(options.averageMethod === undefined ? {} : { averageMethod: options.averageMethod }),
       ...(options.equityBasis === undefined ? {} : { equityBasis: options.equityBasis }),
+      ...(options.historicalAccounts === undefined
+        ? {}
+        : { historicalAccounts: options.historicalAccounts }),
       ...(options.includeZero === undefined ? {} : { includeZero: options.includeZero }),
       rounding,
     });

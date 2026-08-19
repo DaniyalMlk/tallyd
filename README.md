@@ -10,7 +10,7 @@ three invoices. That matching problem is what this project is actually about.
 
 ## Status
 
-Phases 1–10 are done; see [`ROADMAP.md`](./ROADMAP.md). The accounting core is
+Phases 1–11 are done; see [`ROADMAP.md`](./ROADMAP.md). The accounting core is
 complete and tested — money, the chart of accounts, journal entries, the ledger
 and the trial balance — and so is statement ingestion: CSV and OFX readers,
 format detection and duplicate flagging. The matching engine works end to end,
@@ -39,17 +39,25 @@ invoice out of several cannot count a rate movement twice; and the statements ca
 be presented in a currency the books are not kept in, with the translation
 adjustment as a line rather than a plug.
 
+Most recently it consolidates. A group is several sets of books with several
+currencies, holdings that run through one company to reach another, balances
+that have to eliminate against each other, and shareholders outside the group
+with a claim on companies inside it. All of that comes out as a real ledger in
+the presentation currency, one balanced journal entry per step, so every
+consolidated figure can be traced back to what put it there.
+
 ## Running it
 
 ```bash
 npm install
-npm test              # 1,420 tests
+npm test              # 1,611 tests
 npm run typecheck
 npm run demo          # a worked month, posted and reported
 npm run demo:ingest   # the same month as the bank recorded it
 npm run demo:reconcile # the two, matched against each other
 npm run demo:reports  # income statement, balance sheet and ageing
 npm run demo:foreign  # a quarter with a euro customer and a dollar supplier
+npm run demo:group    # three companies in three currencies, consolidated
 npm run bench         # the matcher timed and scored over generated books
 ```
 
@@ -73,6 +81,7 @@ tallyd bench     --sizes 1:10,6:15,12:30
 tallyd learn     -m memory.json -d decisions.json
 tallyd reconcile -l books.json -s statement.csv -m memory.json
 tallyd post      -l books.json -s statement.csv -d decisions.json -o after.json
+tallyd consolidate -g group.json -r rates.csv --show all -o group-books.json
 ```
 
 Every command takes `--json`. Exit codes carry meaning: `0` success, `1` a bad
@@ -653,6 +662,150 @@ report can pass `--present` unconditionally. `--equity closing` exists for the
 case where the rate file does not reach as far back as the share capital does;
 it is wrong in principle and sometimes the only thing available, so it says
 `closing` in the basis column where it was used.
+
+## Consolidating a group
+
+Translation restates one set of books. A group is several, and adding them up is
+the easy part. The hard parts are that the group cannot owe itself money, that
+the parent's investment in a subsidiary and that subsidiary's own share capital
+are the same money counted twice, and that a company the group controls is not
+necessarily a company the group owns all of.
+
+```bash
+tallyd consolidate --group group.json --rates rates.csv --show all
+```
+
+The group document says who holds whom, where each company's books live, which
+balances face which company, and what was paid for each subsidiary. Everything
+else is derived.
+
+### Control and ownership are different questions
+
+```
+The Halden Group — consolidated in GBP
+HH      Halden Holdings         GBP
+HN        Halden Nord GmbH      EUR  80% owned, 20% outside
+HS          Halden Systems Inc  USD  60% owned, 40% outside
+```
+
+Halden Holdings holds 80% of a German company that holds 75% of an American one.
+It controls the American company completely — it directs the company that directs
+it — and owns 60% of it. The other 40% is a non-controlling interest even though
+no outside shareholder holds 40% of anything directly: 20% sits outside the first
+company and 25% outside the second, and the two do not add.
+
+So all of the American company's assets are consolidated, in full, and 40% of its
+net assets are shown as belonging to somebody else.
+
+Ownership is an exact fraction over bigints, not a decimal, because these numbers
+get multiplied down chains and then multiplied by money. Two thirds of three
+quarters is exactly a half; rounded to four places and multiplied through it is
+50.0025%, which surfaces later as a non-controlling interest a few pence out in a
+way nobody can trace. Holdings form a graph and not a tree, so a company held 20%
+directly and 60% through an 80% subsidiary comes out at 68% — the sum over both
+paths, which walking one chain would miss.
+
+Control does not propagate through a company the group does not control. A 40%
+associate holding 90% of something gives the group 36% of it and control of
+neither, so neither consolidates. A definition can assert or deny control
+outright, because control is about the ability to direct and a bare majority is
+neither necessary nor sufficient for it.
+
+### What the group owes itself
+
+```
+Intercompany eliminations — 2 pairs, 270227.76 GBP removed
+HH 1190 Owed by Group Companies              210000.00  balance-sheet
+HN 2190 Owed to Group Companies             -156680.21
+  out by 53319.79 — HH's side is the larger
+```
+
+An account is intercompany because a declaration says so and names the company it
+faces; nothing in a balance reveals whether the other end of it is inside the
+group. Declarations pair on the entity, the counterparty and the relationship —
+two companies almost always have a loan *and* a trading account running between
+them, and pairing on the two companies alone matches the loan against the
+purchases.
+
+The two sides rarely agree. Here the German company repaid 60,000 euros three days
+before the year end and the parent has not recorded it, so the money is in neither
+company's cash and in both companies' intercompany accounts on the wrong side. The
+residual goes to **items in transit** with the pair that produced it and which side
+was larger. It is never plugged: a group whose intercompany accounts are out by six
+figures has a problem, and making the number disappear would be hiding it.
+
+A declaration with no mirror on the other side is reported and *not* eliminated.
+Removing one side on its own would unbalance the group.
+
+### What was paid, and for what
+
+```
+HS — acquired 2025-01-02, 60% to the group, non-controlling interest at fair-value
+  Consideration transferred                        128700.00
+  Non-controlling interest at acquisition           56736.00
+  Net assets acquired                             -126080.00
+  Goodwill                                          59356.00
+    of which attributable to the outside stake       6304.00
+```
+
+Goodwill is the consideration plus the non-controlling interest at acquisition,
+less the net assets acquired — the part of the price that bought something the
+subsidiary's balance sheet does not carry. How the non-controlling interest is
+measured is a choice per acquisition and it changes the answer: proportionately,
+as its share of the identifiable net assets, or at what the outside stake was
+actually worth on the day, in which case the difference is goodwill belonging to
+the outside shareholders.
+
+A price *below* the net assets acquired is a bargain purchase and shows up as a
+gain in the income statement. Negative goodwill sitting in the balance sheet
+would be asserting that the group owns something worth less than nothing.
+
+The investment accounts are translated at the rate on the day the shares were
+bought rather than at the closing rate, because an investment in a subsidiary is
+carried at cost and cost is a fact about the day of the purchase. Retranslated at
+closing it would fail to eliminate against the price paid, and the shortfall
+would sit in the consolidated balance sheet looking like an investment in a
+company nobody could name.
+
+### It comes out as a ledger
+
+Most consolidations are a table of numbers. This one is a `Ledger`: every step is
+a balanced journal entry, so the result is a real set of books in the presentation
+currency that every report already written works on, that serialises, and that
+reads back and verifies.
+
+```
+TB-HH    Halden Holdings — trial balance, restated
+TB-HN    Halden Nord GmbH — trial balance, restated
+TB-HS    Halden Systems Inc — trial balance, restated
+ELIM-001 Eliminate HH/HN intercompany — loan and trading account
+ELIM-002 Eliminate HH/HN intercompany
+CONS-HN  Eliminate the investment in Halden Nord GmbH against its equity
+NCI-HN   20% of Halden Nord GmbH's result for the period
+CONS-HS  Eliminate the investment in Halden Systems Inc against its equity
+NCI-HS   40% of Halden Systems Inc's result for the period
+```
+
+Nothing is adjusted invisibly. If a figure in the consolidated balance sheet is
+wrong, there is an entry with a narration that put it there.
+
+The non-controlling interest's claim is its share of the net assets *now* plus
+whatever goodwill was attributed to it at acquisition — a formulation that needs
+no roll-forward from one period to the next and so cannot drift, which a schedule
+of movements can. Its share of this period's profit is moved out of the result
+attributable to the parent's owners by a separate entry, because without it the
+totals would still be right and the presentation wrong: the whole profit would
+read as the group's and the reserves brought forward would be short by exactly
+the same amount.
+
+The balancing figure on each consolidation entry is the group's share of the
+reserves earned since it took control, and it comes out to exactly
+`groupInterest x (equity removed + net assets at acquisition)`. The tests check
+that identity rather than assuming it.
+
+`tallyd consolidate` exits 2 when the consolidated ledger does not balance or its
+accounting equation leaves a residual — a consolidation that came out wrong ran
+to completion, and a job that treated that as a pass would be worse than none.
 
 ## Using it as a library
 

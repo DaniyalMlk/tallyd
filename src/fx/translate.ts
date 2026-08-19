@@ -110,6 +110,19 @@ export interface TranslationOptions {
    * capital does.
    */
   equityBasis?: "historical" | "closing";
+  /**
+   * Accounts to translate at the rate on the day each movement happened,
+   * whatever their type says.
+   *
+   * The closing rate is right for an asset whose value moves with the currency
+   * — a euro bank balance is worth what euros are worth today. It is wrong for
+   * a non-monetary asset carried at what was paid for it. An investment in a
+   * subsidiary bought for 150,000 euros is carried at cost, and cost is a fact
+   * about the day of the purchase; retranslating it every year would restate a
+   * historical price as though it were a current value, and would then have to
+   * put the movement somewhere it does not belong.
+   */
+  historicalAccounts?: readonly string[];
   includeZero?: boolean;
   rounding?: RoundingMode;
 }
@@ -118,7 +131,13 @@ function resolve(value: Currency | string): Currency {
   return typeof value === "string" ? lookupCurrency(value) : value;
 }
 
-function basisFor(type: AccountType | null, equityBasis: "historical" | "closing"): RateBasis {
+function basisFor(
+  type: AccountType | null,
+  equityBasis: "historical" | "closing",
+  account: string,
+  historicalAccounts: ReadonlySet<string>,
+): RateBasis {
+  if (historicalAccounts.has(account)) return "historical";
   switch (type) {
     case "asset":
     case "liability":
@@ -151,6 +170,7 @@ export function translate(ledger: Ledger, options: TranslationOptions): Translat
   const asAt = parseDate(options.asAt);
   const rounding = options.rounding ?? "half-even";
   const equityBasis = options.equityBasis ?? "historical";
+  const historicalAccounts: ReadonlySet<string> = new Set(options.historicalAccounts ?? []);
   const averageMethod = options.averageMethod ?? "daily";
 
   const period: DateRange =
@@ -194,7 +214,9 @@ export function translate(ledger: Ledger, options: TranslationOptions): Translat
 
   const closing = options.rates.lookup(functional, presentation, asAt).rate;
 
-  const needsAverage = source.rows.some((row) => basisFor(row.type, equityBasis) === "average");
+  const needsAverage = source.rows.some(
+    (row) => basisFor(row.type, equityBasis, row.account, historicalAccounts) === "average",
+  );
   let average: ExchangeRate | null = null;
   if (needsAverage) {
     // A period that reaches back to year 1 is the "everything so far" default;
@@ -213,19 +235,22 @@ export function translate(ledger: Ledger, options: TranslationOptions): Translat
 
   // --------------------------------------------------- historical for equity
   const historical = new Map<string, Money>();
-  if (equityBasis === "historical") {
+  const wantsHistorical = (account: string): boolean => {
+    if (historicalAccounts.has(account)) return true;
+    return equityBasis === "historical" && ledger.chart?.find(account)?.type === "equity";
+  };
+  if (equityBasis === "historical" || historicalAccounts.size > 0) {
     for (const entry of ledger.all()) {
       if (entry.date > asAt) continue;
       for (const posting of entry.postings) {
-        const type = ledger.chart?.find(posting.account)?.type;
-        if (type !== "equity") continue;
+        if (!wantsHistorical(posting.account)) continue;
         if (posting.amount.currency.code !== functional.code) continue;
         let rate: ExchangeRate;
         try {
           rate = options.rates.lookup(functional, presentation, entry.date).rate;
         } catch (error) {
           throw new TranslationError(
-            `Equity is translated at the rate on the day it moved, and entry ${entry.id} ` +
+            `${posting.account} is translated at the rate on the day it moved, and entry ${entry.id} ` +
               `(${entry.date}) has no rate: ${(error as Error).message}. Pass ` +
               `equityBasis "closing" to use the closing rate instead.`,
           );
@@ -241,7 +266,7 @@ export function translate(ledger: Ledger, options: TranslationOptions): Translat
   }
 
   const rows: TranslatedRow[] = source.rows.map((row) => {
-    const basis = basisFor(row.type, equityBasis);
+    const basis = basisFor(row.type, equityBasis, row.account, historicalAccounts);
     let presented: Money;
     let rate: ExchangeRate | null;
     if (basis === "historical") {
