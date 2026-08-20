@@ -105,15 +105,29 @@ all disagree slightly.
       up to, with the difference printed as a line of its own rather than folded
       into the one above it.
 
-- [ ] **13 — Acquired or sold part-way through the year.** A company bought in
-      March contributes a full balance sheet at the year end and nine months of
-      results, and one sold in September contributes eight months of results and
-      no balance sheet at all. Neither is expressible today, because an entity's
-      result is read as the balance on its income accounts at the reporting date
-      rather than as the movement over the period it was controlled for. That
-      one substitution is also what the comparatives want: books that have never
-      been closed to reserves currently hand the outside stake a share of every
-      year's profit at once.
+- [x] **13 — Acquired part-way through the year.** An entity's result read as
+      what its income accounts moved over the part of the period the group
+      controlled it for, rather than what they stand at on the reporting date.
+      The mechanism is a closing entry rather than an adjustment: the books are
+      closed at the date control was obtained, so what is left on the income
+      accounts is the group's result and what came off them is pre-acquisition
+      profit, in the equity the consolidation eliminates against the investment.
+      A view of an entity's books, not a rewrite of them; the file on disk is
+      untouched. The boundary is the acquisition date inclusive, so that a sale
+      made on the day of completion is not counted both in the price paid for
+      the net assets and in the group's result. And the wrong answer printed
+      beside the right one, because the way it is wrong is not visible: every
+      total balances, the accounting equation closes to nil, and the only
+      symptom is a negative figure for reserves earned since control was
+      obtained.
+
+- [ ] **14 — Sold part-way through the year.** The other half of the same
+      question, and the harder one. A company sold in September contributes
+      eight months of results and no balance sheet at all, so it cannot be
+      handled by closing its books and adding them in: it has to be added in and
+      then taken back out, with the difference between what it was carried at
+      and what it sold for recognised as a gain or loss on disposal, and the
+      outside stake's claim on it removed rather than remeasured.
 
 ## Current state
 
@@ -191,8 +205,11 @@ all disagree slightly.
 | `src/group/movement.ts` | Net assets taken apart between two dates, and the schedules built on it |
 | `src/group/comparative.ts` | The same group at two dates, and what will not be compared |
 | `src/demo/groupPeriods.ts` | That group two years running, each figure reached two ways |
+| `src/ledger/close.ts` | The income accounts taken to reserves at a date, as an entry |
+| `src/group/timeline.ts` | How much of the period each entity was the group's |
+| `src/demo/midYear.ts` | A company bought in April, consolidated both ways |
 
-1696 tests across 70 files, typecheck clean.
+1762 tests across 74 files, typecheck clean.
 
 ## Known gaps
 
@@ -265,13 +282,25 @@ all disagree slightly.
   subsidiary is measured against what the subsidiary paid, in full. The
   alternative treatment, which scales that cost by the group's interest in the
   buyer, is not available.
-- The income and expense balances in an entity's trial balance are taken to be
-  the reporting period's result, which is true of books closed to retained
-  earnings each year end and false of books that have never been closed.
-- A company acquired or sold part-way through the period cannot be expressed.
-  An entity's result is the balance on its income accounts at the reporting
-  date, so it is all of the period or none of it, and there is no way to
-  consolidate nine months of one and twelve of another.
+- Nothing verifies that an entity's books were closed at the start of the
+  reporting period. Where they were not, and no acquisition date falls inside
+  the period to give the consolidation a reason to close them, the result is
+  overstated and nothing says so.
+- A company sold part-way through the period cannot be expressed. Acquisition
+  is handled by closing the books at the date control was obtained, and
+  disposal cannot be: the entity has to be added in for part of the period and
+  then taken back out of the closing balance sheet entirely, with a gain or
+  loss on disposal and the outside stake's claim removed rather than
+  remeasured.
+- Books that have never been closed to reserves still hand the group every
+  year's profit at once. `withResultClosed` will fix them and the caller has to
+  ask: without an acquisition date inside the period there is nothing to tell
+  the consolidation that a period boundary is missing, and guessing at one
+  would be worse than the gap.
+- The pre-acquisition result is computed and reported but never translated. It
+  is shown in the entity's own currency, which is honest, and a reader
+  comparing it with the presentation-currency figures beside it has to do the
+  conversion themselves.
 - The movement schedules explain the outside stake and the translation reserve
   and nothing else. Goodwill, the group's own reserves and the individual lines
   of the balance sheet get a comparative column and a movement, which is the

@@ -64,6 +64,7 @@ import type { ConsolidationOptions } from "../group/consolidate.js";
 import { compareConsolidations, renderComparative } from "../group/comparative.js";
 import type { ComparativeConsolidation } from "../group/comparative.js";
 import { renderMovementSchedule, renderNetAssetsMovements } from "../group/movement.js";
+import { renderControlWindows } from "../group/timeline.js";
 import type { MovementSchedule } from "../group/movement.js";
 import { GroupError } from "../group/structure.js";
 import { exposures, renderExposures } from "../fx/exposure.js";
@@ -267,7 +268,7 @@ const COMMANDS: Record<string, { describe: string; flags: FlagSpecs }> = {
       to: { kind: "string", describe: "End of the reporting period", placeholder: "date" },
       comparative: { kind: "string", describe: "Consolidate at this date too and show both columns", placeholder: "date" },
       "comparative-from": { kind: "string", describe: "Start of the comparative period (default: the same length)", placeholder: "date" },
-      show: { kind: "string", describe: "workings (default), combined, eliminations, movement, statements or all", placeholder: "what" },
+      show: { kind: "string", describe: "workings (default), combined, eliminations, windows, movement, statements or all", placeholder: "what" },
       "average-method": { kind: "string", describe: "daily (default) or quoted, for the P&L rate", placeholder: "how" },
       stale: { kind: "string", describe: "Days a quote may be behind the date asked for", placeholder: "days" },
       out: { kind: "string", short: "o", describe: "Write the consolidated ledger as a document", placeholder: "file" },
@@ -1723,6 +1724,16 @@ function consolidateCommand(environment: CliEnvironment, argv: readonly string[]
             nonControllingInterest: entity.nonControlling.toJSON(),
           })),
           notConsolidated: result.aggregation.excluded,
+          controlWindows: result.aggregation.entities.map((contribution) => ({
+            entity: contribution.entity,
+            from: contribution.control.window?.from ?? null,
+            to: contribution.control.window?.to ?? null,
+            whole: contribution.control.whole,
+            acquiredDuring: contribution.control.acquiredDuring,
+            applied: contribution.windowApplied,
+            preAcquisitionResult: contribution.preAcquisitionResult.toDecimalString(),
+            reason: contribution.control.reason,
+          })),
           workings: result.workings.map((working) => ({
             entity: working.entity,
             acquired: working.acquisition.acquired,
@@ -1792,7 +1803,7 @@ function consolidateCommand(environment: CliEnvironment, argv: readonly string[]
   }
 
   const show = stringFlag(parsed, "show") ?? "workings";
-  const known = ["workings", "combined", "eliminations", "movement", "statements", "all"];
+  const known = ["workings", "combined", "eliminations", "windows", "movement", "statements", "all"];
   if (!known.includes(show)) {
     throw new ArgumentError(`--show wants one of ${known.join(", ")}, got "${show}"`);
   }
@@ -1801,6 +1812,19 @@ function consolidateCommand(environment: CliEnvironment, argv: readonly string[]
   const sections: string[] = [];
   sections.push(result.group.render());
   sections.push("");
+  // Printed whenever any entity was not the group's for the whole period,
+  // whatever --show says: a consolidation covering nine months of one company
+  // and twelve of another should never be read without knowing that.
+  const partial = result.aggregation.entities.some((c) => c.control.acquiredDuring);
+  if (wants("windows") || partial) {
+    sections.push(
+      renderControlWindows(
+        result.aggregation.entities.map((c) => c.control),
+        (entity) => result.group.get(entity).name,
+      ),
+    );
+    sections.push("");
+  }
   if (wants("combined")) {
     sections.push(renderAggregation(result.aggregation));
     sections.push("");

@@ -34,7 +34,9 @@ import type { Ledger } from "../ledger/ledger.js";
 import type { AverageMethod } from "../fx/average.js";
 import type { RateTable } from "../fx/table.js";
 import { type Translation, translate } from "../fx/translate.js";
+import { closingEntry } from "../ledger/close.js";
 import { GroupError, type GroupStructure } from "./structure.js";
+import { type ControlWindow, controlWindow } from "./timeline.js";
 
 /** The books of each entity, by entity code. */
 export type EntityLedgers = ReadonlyMap<string, Ledger> | Readonly<Record<string, Ledger>>;
@@ -55,6 +57,19 @@ export interface EntityContribution {
   readonly translation: Translation;
   /** That entity's share of the group's translation reserve. */
   readonly translationAdjustment: Money;
+  /** How much of the reporting period the group controlled it for. */
+  readonly control: ControlWindow;
+  /**
+   * Whether that window was applied. False only when the caller asked for the
+   * whole period regardless, so a reader is never shown a window beside
+   * figures that ignore it.
+   */
+  readonly windowApplied: boolean;
+  /**
+   * The result taken to reserves before translating, because it was earned
+   * before the group controlled the company. Nil for an entity held all period.
+   */
+  readonly preAcquisitionResult: Money;
 }
 
 export interface NameConflict {
@@ -94,6 +109,17 @@ export interface AggregationOptions {
   historicalAccounts?: readonly string[];
   rounding?: RoundingMode;
   includeZero?: boolean;
+  /**
+   * Where an entity's pre-acquisition result goes when its books are closed at
+   * the date control was obtained. Retained earnings by default.
+   */
+  reserves?: string;
+  /**
+   * Add an entity acquired part-way through the period in full anyway, as it
+   * was before. Off by default: the honest answer is that only the part of the
+   * period the group controlled the company for is the group's.
+   */
+  wholePeriodRegardless?: boolean;
 }
 
 function ledgerFor(ledgers: EntityLedgers, code: string): Ledger | undefined {
@@ -134,8 +160,55 @@ export function aggregate(
   const names = new Map<string, Map<string, string>>();
   const order: string[] = [];
 
+  // The reporting period each entity's window is cut out of. Where none was
+  // given there is nothing to cut: a consolidation with no period is a
+  // consolidation about one date, and every entity is taken to have been the
+  // group's for all of it.
+  const reportingPeriod = options.period ?? { from: asAt, to: asAt };
+
   for (const entity of consolidated) {
-    const ledger = ledgerFor(ledgers, entity.code) as Ledger;
+    const original = ledgerFor(ledgers, entity.code) as Ledger;
+    const control = controlWindow(entity, reportingPeriod);
+    if (control.window === null && !control.acquiredDuring) {
+      throw new GroupError(
+        `${entity.code} was ${control.reason}, so it cannot be consolidated as at ` +
+          `${asAt}. Either the acquisition date or the reporting date is wrong.`,
+      );
+    }
+
+    // A company acquired part-way through the period has its own books closed
+    // at the date control was obtained — as a view, not a rewrite. What is
+    // left on the income accounts afterwards is the group's result, and what
+    // was taken off them is pre-acquisition profit sitting in the equity that
+    // the consolidation eliminates against the investment.
+    let ledger = original;
+    let windowApplied = true;
+    let preAcquisitionResult = Money.zero(entity.currency);
+    if (control.closeAt !== null && options.wholePeriodRegardless === true) {
+      windowApplied = false;
+    }
+    if (control.closeAt !== null && options.wholePeriodRegardless !== true) {
+      const reserves = options.reserves ?? "3200";
+      const closing = closingEntry(original, control.closeAt, {
+        currency: entity.currency,
+        reserves,
+        id: `PRE-ACQ-${entity.code}`,
+        narration:
+          `${entity.code} — result to ${control.closeAt} is pre-acquisition and ` +
+          `belongs to the seller`,
+        tags: ["consolidation", "pre-acquisition"],
+      });
+      if (closing !== null) {
+        // Credit-positive, the way a result reads, and the way
+        // `profitForPeriod` reads on the other side of the acquisition date.
+        preAcquisitionResult = closing.postings
+          .filter((posting) => posting.account === reserves)
+          .reduce((running, posting) => running.plus(posting.amount), Money.zero(entity.currency))
+          .negated();
+        ledger = original.post(closing);
+      }
+    }
+
     const translation = translate(ledger, {
       presentation,
       functional: entity.currency,
@@ -157,6 +230,9 @@ export function aggregate(
         functional: entity.currency,
         translation,
         translationAdjustment: translation.translationAdjustment,
+        control,
+        windowApplied,
+        preAcquisitionResult,
       }),
     );
 

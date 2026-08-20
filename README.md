@@ -10,7 +10,7 @@ three invoices. That matching problem is what this project is actually about.
 
 ## Status
 
-Phases 1–12 are done; see [`ROADMAP.md`](./ROADMAP.md). The accounting core is
+Phases 1–13 are done; see [`ROADMAP.md`](./ROADMAP.md). The accounting core is
 complete and tested — money, the chart of accounts, journal entries, the ledger
 and the trial balance — and so is statement ingestion: CSV and OFX readers,
 format detection and duplicate flagging. The matching engine works end to end,
@@ -59,6 +59,7 @@ npm run demo:reports  # income statement, balance sheet and ageing
 npm run demo:foreign  # a quarter with a euro customer and a dollar supplier
 npm run demo:group    # three companies in three currencies, consolidated
 npm run demo:periods  # that group two years running, and what moved between
+npm run demo:midyear  # a company bought in April, consolidated both ways
 npm run bench         # the matcher timed and scored over generated books
 ```
 
@@ -892,6 +893,71 @@ worse than no schedule: it is the same number with the evidence removed.
 
 `npm run demo:periods` runs the Halden group over both years and ends by
 computing each figure both ways and printing the difference.
+
+### A company bought part-way through the year
+
+A subsidiary acquired in April contributes a full balance sheet at the year end
+and nine months of results. Getting that wrong is easy and quiet: take all
+twelve months and the group reports revenue it did not earn, hands the outside
+stake a share of a profit made before the stake existed, and puts the first
+quarter's profit into post-acquisition reserves where it does not belong. Every
+total still balances. The accounting equation still closes to nil.
+
+The result of a period is now what an entity's income accounts *moved* over the
+part of it the group controlled the company for, rather than what they *stand
+at* on the reporting date. The mechanism is a closing entry: the entity's books
+are closed at the date control was obtained, so what is left on the income
+accounts is the group's result and what came off them is pre-acquisition profit
+sitting in the equity the consolidation eliminates against the investment.
+
+It is an entry rather than an adjustment, for the same reason everything else
+here is — if a figure changed there is a balanced journal entry with a narration
+that changed it. And it produces a new ledger rather than modifying one: an
+entity's books are not the group's to rewrite, so the group takes a view of them
+closed at a date and the file on disk is untouched.
+
+```
+How much of the period each company was the group's
+  FG Fenwick Group      the whole period      no acquisition date, so the whole period is taken to be the group's
+  AL Aldermere Ltd      2026-04-02 to 2026-12-31   acquired 2026-04-01, part-way through the period
+```
+
+That table prints whatever `--show` says as soon as any entity was not the
+group's for the whole period, because a consolidation covering nine months of
+one company and twelve of another should not be read without knowing it.
+
+The boundary is the acquisition date inclusive. It is arbitrary and it has to be
+consistent with something, and the thing it has to be consistent with is that
+net assets at acquisition are measured *as at* that date. Otherwise a sale made
+on the day of completion would be counted twice: once in the price paid for the
+net assets and once in the group's result.
+
+`npm run demo:midyear` prints the same books consolidated both ways. The wrong
+answer is worth printing rather than describing:
+
+```
+  Result the group is entitled to                        120000.00
+  Result taking the whole year                           180000.00
+  Overstated by                                           60000.00
+
+  Outside stake's share, correctly                        30000.00
+  Outside stake's share, taking the year                  45000.00
+
+  Post-acquisition reserves, correctly                        0.00
+  Post-acquisition reserves, taking the year             -45000.00
+```
+
+The only visible symptom is that last line: reserves earned since control was
+obtained, and they are negative, which on those numbers would mean they had been
+earned backwards. Net assets at the reporting date are 420,000 either way. Only
+the split between what was bought and what was earned moves.
+
+The same substitution helps a second case. `withResultClosed` is on the ledger,
+not the group, so a caller with books that have never been closed can close them
+at the period start and get a result for the period rather than every year since
+the company was formed. The consolidation does not do that on its own: without
+an acquisition date inside the period it has no way to know a period boundary is
+missing, and guessing at one would be worse than the gap.
 
 ## Using it as a library
 
