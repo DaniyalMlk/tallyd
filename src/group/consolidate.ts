@@ -437,21 +437,21 @@ export function renderConsolidation(result: Consolidation): string {
       `${working.entity} — ${result.group.get(working.entity).name}, ` +
         `${working.acquisition.groupInterest.toPercentString(4)} to the group`,
     );
-    const control = result.aggregation.entities.find(
-      (c) => c.entity === working.entity,
-    )?.control;
+    const contribution = result.aggregation.entities.find((c) => c.entity === working.entity);
+    const control = contribution?.control;
     if (control?.acquiredDuring === true && control.window !== null) {
       lines.push(
-        `  Consolidated from ${control.window.from}, not from ${control.period.from}: ` +
-          `${control.reason}.`,
+        contribution?.windowApplied === true
+          ? `  Consolidated from ${control.window.from}, not from ${control.period.from}: ` +
+            `${control.reason}.`
+          : `  ${control.reason} — and consolidated for the whole of it anyway, ` +
+            `because that is what was asked for.`,
       );
       // In the entity's own currency, not the group's: it is a figure read off
       // that company's books, and translating it would need a rate for a
       // period the group was not there for.
-      const before = result.aggregation.entities.find(
-        (c) => c.entity === working.entity,
-      )?.preAcquisitionResult;
-      if (before !== undefined) {
+      const before = contribution?.preAcquisitionResult;
+      if (before !== undefined && contribution?.windowApplied === true) {
         lines.push(
           label(`Earned before the group controlled it (${before.currency.code})`, before),
         );

@@ -60,6 +60,12 @@ export interface EntityContribution {
   /** How much of the reporting period the group controlled it for. */
   readonly control: ControlWindow;
   /**
+   * Whether that window was applied. False only when the caller asked for the
+   * whole period regardless, so a reader is never shown a window beside
+   * figures that ignore it.
+   */
+  readonly windowApplied: boolean;
+  /**
    * The result taken to reserves before translating, because it was earned
    * before the group controlled the company. Nil for an entity held all period.
    */
@@ -176,7 +182,11 @@ export function aggregate(
     // was taken off them is pre-acquisition profit sitting in the equity that
     // the consolidation eliminates against the investment.
     let ledger = original;
+    let windowApplied = true;
     let preAcquisitionResult = Money.zero(entity.currency);
+    if (control.closeAt !== null && options.wholePeriodRegardless === true) {
+      windowApplied = false;
+    }
     if (control.closeAt !== null && options.wholePeriodRegardless !== true) {
       const reserves = options.reserves ?? "3200";
       const closing = closingEntry(original, control.closeAt, {
@@ -221,6 +231,7 @@ export function aggregate(
         translation,
         translationAdjustment: translation.translationAdjustment,
         control,
+        windowApplied,
         preAcquisitionResult,
       }),
     );
