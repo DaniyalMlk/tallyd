@@ -40,6 +40,12 @@ export {
   renderEliminations,
 } from "./intercompany.js";
 export {
+  type ControlWindow,
+  controlWindow,
+  controlWindows,
+  renderControlWindows,
+} from "./timeline.js";
+export {
   type MovementLine,
   type MovementOptions,
   type MovementSchedule,
