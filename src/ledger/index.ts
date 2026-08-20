@@ -61,3 +61,10 @@ export {
   ledgerFromDocument,
   ledgerFromJson,
 } from "./serialise.js";
+export {
+  type CloseOptions,
+  CloseError,
+  closingEntry,
+  resultOver,
+  withResultClosed,
+} from "./close.js";
