@@ -15,6 +15,7 @@
     "demo:reports": "vite-node src/demo/mainStatements.ts",
     "demo:foreign": "vite-node src/demo/mainForeign.ts",
     "demo:group": "vite-node src/demo/mainGroup.ts",
+    "demo:periods": "vite-node src/demo/mainGroupPeriods.ts",
     "cli": "vite-node src/cli/main.ts --",
     "bench": "vite-node src/cli/main.ts -- bench",
     "generate": "vite-node src/cli/main.ts -- generate"

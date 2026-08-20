@@ -15,8 +15,8 @@
 
 import { Money } from "../money/money.js";
 import { currency as lookupCurrency } from "../money/currency.js";
-import { date, dateRange } from "../ledger/date.js";
-import type { CalendarDate } from "../ledger/date.js";
+import { addDays, compareDates, date, dateRange, daysBetween } from "../ledger/date.js";
+import type { CalendarDate, DateRange } from "../ledger/date.js";
 import type { Ledger } from "../ledger/ledger.js";
 import { ledgerFromJson, ledgerToJson } from "../ledger/serialise.js";
 import { renderTrialBalance, trialBalance } from "../ledger/trialBalance.js";
@@ -60,6 +60,11 @@ import { renderAggregation } from "../group/aggregate.js";
 import { renderEliminations } from "../group/intercompany.js";
 import { renderAcquisition } from "../group/acquisition.js";
 import { consolidate, renderConsolidation } from "../group/consolidate.js";
+import type { ConsolidationOptions } from "../group/consolidate.js";
+import { compareConsolidations, renderComparative } from "../group/comparative.js";
+import type { ComparativeConsolidation } from "../group/comparative.js";
+import { renderMovementSchedule, renderNetAssetsMovements } from "../group/movement.js";
+import type { MovementSchedule } from "../group/movement.js";
 import { GroupError } from "../group/structure.js";
 import { exposures, renderExposures } from "../fx/exposure.js";
 import {
@@ -260,7 +265,9 @@ const COMMANDS: Record<string, { describe: string; flags: FlagSpecs }> = {
       "as-at": { kind: "string", describe: "Reporting date (default: the group document's)", placeholder: "date" },
       from: { kind: "string", describe: "Start of the reporting period", placeholder: "date" },
       to: { kind: "string", describe: "End of the reporting period", placeholder: "date" },
-      show: { kind: "string", describe: "workings (default), combined, eliminations, statements or all", placeholder: "what" },
+      comparative: { kind: "string", describe: "Consolidate at this date too and show both columns", placeholder: "date" },
+      "comparative-from": { kind: "string", describe: "Start of the comparative period (default: the same length)", placeholder: "date" },
+      show: { kind: "string", describe: "workings (default), combined, eliminations, movement, statements or all", placeholder: "what" },
       "average-method": { kind: "string", describe: "daily (default) or quoted, for the P&L rate", placeholder: "how" },
       stale: { kind: "string", describe: "Days a quote may be behind the date asked for", placeholder: "days" },
       out: { kind: "string", short: "o", describe: "Write the consolidated ledger as a document", placeholder: "file" },
@@ -1565,6 +1572,22 @@ function revalueCommand(environment: CliEnvironment, argv: readonly string[]): C
  * equation leaves a residual: a consolidation that came out wrong ran to
  * completion, and a job that treated that as a pass would be worse than none.
  */
+/** A movement schedule as JSON: the lines as given, and what does not tie. */
+function scheduleToJson(schedule: MovementSchedule): Record<string, unknown> {
+  return {
+    what: schedule.what,
+    opening: schedule.opening.toDecimalString(),
+    lines: schedule.lines.map((line) => ({
+      label: line.label,
+      amount: line.amount.toDecimalString(),
+    })),
+    rolledForward: schedule.rolledForward.toDecimalString(),
+    unexplained: schedule.unexplained.toDecimalString(),
+    closing: schedule.closing.toDecimalString(),
+    reconciles: schedule.reconciles,
+  };
+}
+
 function consolidateCommand(environment: CliEnvironment, argv: readonly string[]): CliResult {
   const parsed = parseArgs(argv, (COMMANDS["consolidate"] as { flags: FlagSpecs }).flags);
   const groupPath = requiredFlag(parsed, "group");
@@ -1621,17 +1644,53 @@ function consolidateCommand(environment: CliEnvironment, argv: readonly string[]
     throw new ArgumentError(`--average-method wants daily or quoted, got "${methodText}"`);
   }
 
+  const consolidationOptions = (on: CalendarDate, over: DateRange | undefined): ConsolidationOptions => ({
+    rates,
+    asAt: String(on),
+    ...(over === undefined ? {} : { period: over }),
+    ...(methodText === undefined ? {} : { averageMethod: methodText }),
+    ...(group.equityBasis === null ? {} : { equityBasis: group.equityBasis }),
+    intercompany: group.intercompany,
+    acquisitions: group.acquisitions,
+  });
+
+  // The comparative period defaults to one of the same length ending on the
+  // comparative date, which for the ordinary annual case is exactly the year
+  // before and needs nobody to type it out. Where the two periods are not the
+  // same length, --comparative-from says so.
+  const comparativeText = stringFlag(parsed, "comparative");
+  let priorPeriod: DateRange | undefined;
+  let priorAsAt: CalendarDate | undefined;
+  if (comparativeText !== undefined) {
+    priorAsAt = date(comparativeText);
+    if (compareDates(priorAsAt, asAt) !== -1) {
+      throw new ArgumentError(
+        `--comparative ${comparativeText} is not before the reporting date ${asAt}.`,
+      );
+    }
+    const fromComparative = stringFlag(parsed, "comparative-from");
+    if (fromComparative !== undefined) {
+      priorPeriod = dateRange(fromComparative, String(priorAsAt));
+    } else if (period !== undefined) {
+      priorPeriod = dateRange(
+        String(addDays(priorAsAt, -daysBetween(period.from, period.to))),
+        String(priorAsAt),
+      );
+    }
+  }
+
   let result;
+  let compared: ComparativeConsolidation | undefined;
   try {
-    result = consolidate(group.structure, ledgers, {
-      rates,
-      asAt: String(asAt),
-      ...(period === undefined ? {} : { period }),
-      ...(methodText === undefined ? {} : { averageMethod: methodText }),
-      ...(group.equityBasis === null ? {} : { equityBasis: group.equityBasis }),
-      intercompany: group.intercompany,
-      acquisitions: group.acquisitions,
-    });
+    result = consolidate(group.structure, ledgers, consolidationOptions(asAt, period));
+    if (priorAsAt !== undefined) {
+      const priorResult = consolidate(
+        group.structure,
+        ledgers,
+        consolidationOptions(priorAsAt, priorPeriod),
+      );
+      compared = compareConsolidations(priorResult, result, { rates });
+    }
   } catch (error) {
     if (error instanceof GroupError) throw new ArgumentError(error.message);
     throw error;
@@ -1694,6 +1753,34 @@ function consolidateCommand(environment: CliEnvironment, argv: readonly string[]
           investmentResidual: result.investmentResidual.toDecimalString(),
           residual: result.residual.toDecimalString(),
           balanced: result.balanced,
+          ...(compared === undefined
+            ? {}
+            : {
+                comparative: {
+                  asAt: compared.comparativeAsAt,
+                  entered: compared.entered,
+                  left: compared.left,
+                  sound: compared.sound,
+                  rows: compared.rows.map((row) => ({
+                    account: row.account,
+                    name: row.name,
+                    current: row.current.toDecimalString(),
+                    prior: row.prior.toDecimalString(),
+                    movement: row.movement.toDecimalString(),
+                  })),
+                  netAssets: compared.netAssets.map((movement) => ({
+                    entity: movement.entity,
+                    opening: movement.opening.toDecimalString(),
+                    translationEffect: movement.translationEffect.toDecimalString(),
+                    result: movement.result.toDecimalString(),
+                    other: movement.other.toDecimalString(),
+                    closing: movement.closing.toDecimalString(),
+                    comparable: movement.comparable,
+                  })),
+                  nonControllingInterest: scheduleToJson(compared.nci),
+                  translationReserve: scheduleToJson(compared.translationReserve),
+                },
+              }),
           ...(written === undefined ? {} : { written }),
         },
         null,
@@ -1705,7 +1792,7 @@ function consolidateCommand(environment: CliEnvironment, argv: readonly string[]
   }
 
   const show = stringFlag(parsed, "show") ?? "workings";
-  const known = ["workings", "combined", "eliminations", "statements", "all"];
+  const known = ["workings", "combined", "eliminations", "movement", "statements", "all"];
   if (!known.includes(show)) {
     throw new ArgumentError(`--show wants one of ${known.join(", ")}, got "${show}"`);
   }
@@ -1729,6 +1816,20 @@ function consolidateCommand(environment: CliEnvironment, argv: readonly string[]
     }
   }
   sections.push(renderConsolidation(result));
+  if (compared !== undefined) {
+    sections.push("");
+    sections.push(renderComparative(compared));
+  }
+  if (compared !== undefined && (wants("movement") || show === "workings")) {
+    sections.push("");
+    sections.push(
+      renderNetAssetsMovements(compared.netAssets, (entity) => compared.group.get(entity).name),
+    );
+    sections.push("");
+    sections.push(renderMovementSchedule(compared.nci));
+    sections.push("");
+    sections.push(renderMovementSchedule(compared.translationReserve));
+  }
   if (wants("statements")) {
     sections.push("");
     sections.push(renderTrialBalance(result.trialBalance));

@@ -88,12 +88,32 @@ all disagree slightly.
       presentation currency, one balanced entry per step, that every existing
       report reads and that serialises and loads back.
 
-- [ ] **12 — Consolidating over time.** A consolidation is prepared every period
-      and each one currently starts from nothing. The comparatives, the movement
-      in the non-controlling interest and in the translation reserve, and a
-      group that acquires or disposes of a company part-way through a year are
-      all questions about two dates rather than one, and none of them can be
-      answered by a report that only knows about the reporting date.
+- [x] **12 — Two dates rather than one.** The same books consolidated at a
+      second date, so a set of group accounts can carry the comparative column
+      it is published with — and nothing kept from last time, because an
+      entity's ledger is a complete history and last year's balance sheet is
+      the same file asked a different question. Then the movement between the
+      two columns, for the two figures that mean least on their own: the net
+      assets underneath taken apart into what the currency did to the opening
+      balance, what the entity earned at the average rate, and a residual
+      defined as what is left, so the three are exhaustive and the identity
+      holds exactly. Retranslation that respects each row's basis, so an
+      investment held at what was paid for it shows no currency movement and
+      the residual does not silently absorb one. The outside stake and the
+      translation reserve each rolled forward from those components, closing at
+      what the consolidation measures directly rather than at what the lines add
+      up to, with the difference printed as a line of its own rather than folded
+      into the one above it.
+
+- [ ] **13 — Acquired or sold part-way through the year.** A company bought in
+      March contributes a full balance sheet at the year end and nine months of
+      results, and one sold in September contributes eight months of results and
+      no balance sheet at all. Neither is expressible today, because an entity's
+      result is read as the balance on its income accounts at the reporting date
+      rather than as the movement over the period it was controlled for. That
+      one substitution is also what the comparatives want: books that have never
+      been closed to reserves currently hand the outside stake a share of every
+      year's profit at once.
 
 ## Current state
 
@@ -168,8 +188,11 @@ all disagree slightly.
 | `src/group/document.ts` | The group document, validated on the way in |
 | `src/demo/group.ts` | Three companies in three currencies, one held through another |
 | `src/demo/groupReport.ts` | That group consolidated, with the split checked at the end |
+| `src/group/movement.ts` | Net assets taken apart between two dates, and the schedules built on it |
+| `src/group/comparative.ts` | The same group at two dates, and what will not be compared |
+| `src/demo/groupPeriods.ts` | That group two years running, each figure reached two ways |
 
-1611 tests across 66 files, typecheck clean.
+1696 tests across 70 files, typecheck clean.
 
 ## Known gaps
 
@@ -245,9 +268,14 @@ all disagree slightly.
 - The income and expense balances in an entity's trial balance are taken to be
   the reporting period's result, which is true of books closed to retained
   earnings each year end and false of books that have never been closed.
-- One consolidation, one date. There are no comparatives, no movement schedule
-  for the non-controlling interest or the translation reserve, and no way to
-  express a company acquired or sold part-way through the period.
+- A company acquired or sold part-way through the period cannot be expressed.
+  An entity's result is the balance on its income accounts at the reporting
+  date, so it is all of the period or none of it, and there is no way to
+  consolidate nine months of one and twelve of another.
+- The movement schedules explain the outside stake and the translation reserve
+  and nothing else. Goodwill, the group's own reserves and the individual lines
+  of the balance sheet get a comparative column and a movement, which is the
+  arithmetic, but no schedule saying what the movement was made of.
 - The dashboard knows nothing about groups. It reconciles one bank account for
   one company, which is what it is for, but there is no view of a consolidation.
 - The matcher still holds both sides in memory. A year of a busy account

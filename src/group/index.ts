@@ -40,6 +40,29 @@ export {
   renderEliminations,
 } from "./intercompany.js";
 export {
+  type MovementLine,
+  type MovementOptions,
+  type MovementSchedule,
+  type NciMovement,
+  type NetAssetsMovement,
+  nciMovements,
+  nciSchedule,
+  netAssetsMovement,
+  netAssetsMovements,
+  renderMovementSchedule,
+  renderNetAssetsMovements,
+  translationReserveSchedule,
+} from "./movement.js";
+export {
+  type ComparativeConsolidation,
+  type ComparativeConsolidationOptions,
+  type ComparativeOptions,
+  type ComparativeRow,
+  compareConsolidations,
+  consolidateComparative,
+  renderComparative,
+} from "./comparative.js";
+export {
   type Aggregation,
   type AggregationOptions,
   type CombinedRow,
