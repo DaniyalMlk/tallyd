@@ -219,3 +219,19 @@ export function groupPeriod(): DateRange {
 }
 
 export const GROUP_AS_AT = "2026-12-31";
+
+/**
+ * The year before.
+ *
+ * Both companies were acquired on 2 January 2025, so both are consolidated at
+ * either date and the comparison between them is a like-for-like one. The 2025
+ * results were closed to reserves at that year end, which is what makes the
+ * prior balance sheet a balance sheet: the profit and loss accounts are nil
+ * and everything the year earned is sitting in the reserves the 2026
+ * consolidation opens with.
+ */
+export function groupPriorPeriod(): DateRange {
+  return dateRange("2025-01-01", "2025-12-31");
+}
+
+export const GROUP_PRIOR_AS_AT = "2025-12-31";
