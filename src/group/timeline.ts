@@ -25,9 +25,12 @@
  *   was obtained and the books are closed at the acquisition date, so that
  *   everything up to and including that day is reserves and everything after it
  *   is the group's result.
- * - **None of it.** Acquired after the reporting date, which is not something a
- *   consolidation as at that date should be doing at all, and is reported
- *   rather than silently treated as a full period.
+ * - **None of it.** Two quite different cases that both come out as no window.
+ *   Acquired *on* the reporting date: the group owns the balance sheet and none
+ *   of the period's result, which is a real and consolidatable position.
+ *   Acquired *after* it: not something a consolidation as at that date should be
+ *   doing at all, and refused rather than silently treated as a full period.
+ *   `acquiredDuring` is what tells the two apart.
  *
  * The boundary is worth stating because it is arbitrary and has to be
  * consistent: net assets at acquisition are measured *as at* the acquisition
@@ -102,6 +105,22 @@ export function controlWindow(entity: Entity, period: DateRange): ControlWindow 
   // Control obtained on or inside the period. Everything to and including that
   // day is the seller's; the window opens the day after.
   const opens = maxDate(addDays(entity.acquired, 1), period.from);
+  if (compareDates(opens, period.to) === 1) {
+    // Control obtained on the reporting date itself. The group owns the
+    // balance sheet and none of the period's result, which is a window with
+    // no days in it rather than no window at all — the books still need
+    // closing, and the entity is still consolidated.
+    return Object.freeze({
+      ...base,
+      window: null,
+      whole: false,
+      acquiredDuring: true,
+      closeAt: entity.acquired,
+      reason:
+        `acquired ${entity.acquired}, the reporting date, so none of the period's ` +
+        `result is the group's`,
+    });
+  }
   return Object.freeze({
     ...base,
     window: dateRange(String(opens), String(period.to)),

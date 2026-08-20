@@ -169,7 +169,7 @@ export function aggregate(
   for (const entity of consolidated) {
     const original = ledgerFor(ledgers, entity.code) as Ledger;
     const control = controlWindow(entity, reportingPeriod);
-    if (control.window === null) {
+    if (control.window === null && !control.acquiredDuring) {
       throw new GroupError(
         `${entity.code} was ${control.reason}, so it cannot be consolidated as at ` +
           `${asAt}. Either the acquisition date or the reporting date is wrong.`,
