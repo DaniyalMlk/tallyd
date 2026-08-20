@@ -34,6 +34,7 @@ import { Money } from "../money/money.js";
 import type { Currency } from "../money/currency.js";
 import type { AccountType } from "../accounts/types.js";
 import type { CalendarDate } from "../ledger/date.js";
+import { trialBalance } from "../ledger/trialBalance.js";
 import { GroupError, type GroupStructure } from "./structure.js";
 import { type Consolidation, type ConsolidationOptions, consolidate } from "./consolidate.js";
 import type { EntityLedgers } from "./aggregate.js";
@@ -114,8 +115,20 @@ export function compareConsolidations(
   }
 
   const zero = Money.zero(presentation);
-  const currentRows = new Map(current.trialBalance.rows.map((r) => [r.account, r] as const));
-  const priorRows = new Map(prior.trialBalance.rows.map((r) => [r.account, r] as const));
+  // A row that eliminated to nil is absent from a trial balance, and an
+  // intercompany account eliminating to nil is exactly the row a reader may
+  // want to see rather than have hidden. So `includeZero` goes back to the
+  // consolidated ledger and asks again rather than filtering what it was given.
+  const rowsOf = (result: Consolidation) =>
+    options.includeZero === true
+      ? trialBalance(result.ledger, {
+          currency: presentation,
+          asAt: result.asAt,
+          includeZero: true,
+        }).rows
+      : result.trialBalance.rows;
+  const currentRows = new Map(rowsOf(current).map((r) => [r.account, r] as const));
+  const priorRows = new Map(rowsOf(prior).map((r) => [r.account, r] as const));
   const accounts = [...new Set([...currentRows.keys(), ...priorRows.keys()])].sort((a, b) =>
     a.localeCompare(b),
   );
