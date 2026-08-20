@@ -10,7 +10,7 @@ three invoices. That matching problem is what this project is actually about.
 
 ## Status
 
-Phases 1–11 are done; see [`ROADMAP.md`](./ROADMAP.md). The accounting core is
+Phases 1–12 are done; see [`ROADMAP.md`](./ROADMAP.md). The accounting core is
 complete and tested — money, the chart of accounts, journal entries, the ledger
 and the trial balance — and so is statement ingestion: CSV and OFX readers,
 format detection and duplicate flagging. The matching engine works end to end,
@@ -58,6 +58,7 @@ npm run demo:reconcile # the two, matched against each other
 npm run demo:reports  # income statement, balance sheet and ageing
 npm run demo:foreign  # a quarter with a euro customer and a dollar supplier
 npm run demo:group    # three companies in three currencies, consolidated
+npm run demo:periods  # that group two years running, and what moved between
 npm run bench         # the matcher timed and scored over generated books
 ```
 
@@ -806,6 +807,91 @@ that identity rather than assuming it.
 `tallyd consolidate` exits 2 when the consolidated ledger does not balance or its
 accounting equation leaves a residual — a consolidation that came out wrong ran
 to completion, and a job that treated that as a pass would be worse than none.
+
+### Two dates, and what moved between them
+
+A consolidated balance sheet is published with last year beside it, and a
+consolidation that only knows one date cannot produce one. `--comparative` runs
+the same books at a second date and sets the two columns side by side:
+
+```
+tallyd consolidate -g group.json -r rates.json --comparative 2025-12-31
+```
+
+Nothing has to have been kept from last time. An entity's ledger is a complete
+history, so last year's balance sheet is the same file asked a different
+question — which means a group that has never prepared a consolidation before
+can still produce a comparative. The comparative period defaults to one of the
+same length ending on the comparative date, which for the ordinary annual case
+is exactly the year before; `--comparative-from` says otherwise.
+
+The reason to want the second column is not the column. It is that two of the
+figures on a consolidated balance sheet mean very little on their own and quite
+a lot as a movement — the non-controlling interest and the translation reserve.
+Both are measured directly from the closing position, which is deliberate: a
+figure computed from the closing balance sheet cannot drift, where one rolled
+forward from last period's can. But that same property means nothing anywhere
+says *why* they moved.
+
+The answer has to come from the net assets underneath, because both figures are
+shares of them, and for a company kept in another currency exactly three things
+move net assets between two dates:
+
+| | |
+|---|---|
+| the currency | the same euros, a different number of pounds; nothing happened inside the company |
+| the result | what the entity earned, at the period's average rate — the rate the income statement uses |
+| everything else | dividends, capital, and the difference between the average rate and the closing one |
+
+The third is defined as what is left, so the three are exhaustive and the
+identity `opening + currency + result + other = closing` holds exactly, with no
+rounding anywhere. The tests check it rather than asserting it.
+
+The first is the one worth being careful about, because getting it wrong is
+invisible. Retranslating opening net assets means retranslating the rows that
+were carried at a rate and *not* the rows that were not. Nord holds its
+investment in Systems at what it paid: 150,000 EUR struck on the day of the
+purchase, and no later rate touches it. Of Nord's opening net assets of 355,500
+only 226,800 moves with sterling, and the currency line says so:
+
+```
+Movement in net assets
+Entity                    Opening     Currency       Result        Other      Closing
+HN Halden Nord GmbH     355500.00     -5400.00      7257.44      -114.55    357242.89
+HS Halden Systems Inc   188650.00     -4900.00     57999.46      -999.46    240750.00
+```
+
+Restating that investment at this year's closing rate would produce a currency
+movement on a balance that never moved — and the residual would silently absorb
+the same figure with the opposite sign, so the identity would still hold and
+both lines would be wrong.
+
+What is left in `other` is then only what it should be. Systems earned 76,000
+USD; at the closing rate that is 57,000 and the income statement translates it
+at the average and gets 57,999.46. The 999.46 has to land somewhere, and it
+lands here rather than in a column labelled "currency", where it is not a
+currency movement on an opening balance.
+
+The share schedules apply each entity's own outside fraction to each component:
+
+```
+Non-controlling interest
+  At the start of the period                   152864.00
+  Share of the result for the period            24651.27
+  Share of the translation effect               -3040.00
+  Share of other movements in net assets         -422.69
+  At the reporting date                        174052.58
+```
+
+That closing figure is what the consolidation reports, not what the lines add
+up to. Applying a fraction three times rounds three times where measuring
+directly rounds once, so the two can differ — and where they do, the difference
+is printed as a line of its own called *Not explained by the above*, never
+folded into the line above it. A schedule that quietly plugs its last line is
+worse than no schedule: it is the same number with the evidence removed.
+
+`npm run demo:periods` runs the Halden group over both years and ends by
+computing each figure both ways and printing the difference.
 
 ## Using it as a library
 
