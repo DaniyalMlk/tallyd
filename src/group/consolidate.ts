@@ -611,12 +611,23 @@ export function renderConsolidation(result: Consolidation): string {
         );
       }
     }
+    // For a company the group still holds, these are figures at the reporting
+    // date. For one it sold they are figures at the date it went, and saying
+    // "now" about them would be saying something untrue about a company the
+    // group does not own.
+    const readAt = contribution?.readAt;
+    const gone = control?.disposedDuring === true;
     lines.push(label("Goodwill", working.acquisition.goodwill));
-    lines.push(label("Net assets now", working.netAssetsNow));
+    lines.push(label(gone ? `Net assets at ${readAt}` : "Net assets now", working.netAssetsNow));
     lines.push(label("Result for the period", working.profitForPeriod));
     if (!working.acquisition.nonControllingInterest.isZero) {
       lines.push(label("Outside stake's share of the result", working.nciProfitShare));
-      lines.push(label("Outside stake at the reporting date", working.nciClosing));
+      lines.push(
+        label(
+          gone ? `Outside stake at ${readAt}` : "Outside stake at the reporting date",
+          working.nciClosing,
+        ),
+      );
     }
     lines.push(label("Group's post-acquisition reserves", working.postAcquisitionReserves));
     lines.push("");
