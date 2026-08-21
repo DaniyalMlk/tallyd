@@ -135,6 +135,14 @@ export interface Consolidation {
   readonly translationReserve: Money;
   /** Left in the investment account after the eliminations, which should be nil. */
   readonly investmentResidual: Money;
+  /**
+   * What the disposal accounts carry over and above the group's own gain,
+   * credit-positive. Nil when the proceeds the consolidation was told about are
+   * the proceeds the holder's books recorded; anything else means the two
+   * disagree about the same sale, and the difference is sitting in the income
+   * statement looking like a result.
+   */
+  readonly disposalResidual: Money;
   /** Assets less liabilities less equity less the result. Nil when it hangs together. */
   readonly residual: Money;
   readonly balanced: boolean;
@@ -542,6 +550,25 @@ export function consolidate(
 
   const balanceOf = (code: string): Money => ledger.balanceOf(code, presentation);
 
+  const disposalResult = sumMoney(
+    disposalWorkings.map((w) => w.result),
+    presentation,
+  );
+  // The disposal accounts should end up carrying the group's gain and nothing
+  // else: the holder's own figure went in from its trial balance and came
+  // straight back out. A residue means the proceeds this consolidation was
+  // given are not the proceeds the holder's books recorded — the same sale
+  // described two ways, with the difference left in the income statement.
+  const disposalAccounts = new Set(
+    disposalWorkings.flatMap((w) => [w.disposal.account, w.disposal.holderAccount]),
+  );
+  const disposalResidual = sumMoney(
+    [...disposalAccounts].map((code) => balanceOf(code)),
+    presentation,
+  )
+    .plus(disposalResult)
+    .negated();
+
   return Object.freeze({
     group,
     presentation,
@@ -551,10 +578,8 @@ export function consolidate(
     eliminations,
     workings: Object.freeze(workings),
     disposals: Object.freeze(disposalWorkings),
-    disposalResult: sumMoney(
-      disposalWorkings.map((w) => w.result),
-      presentation,
-    ),
+    disposalResult,
+    disposalResidual,
     ledger,
     chart,
     trialBalance: tb,
@@ -677,6 +702,12 @@ export function renderConsolidation(result: Consolidation): string {
         (result.disposals.length > 0
           ? "  <- a disposal assumes the holder's own books already record the sale"
           : "  <- the books carry it at something other than what was paid"),
+    );
+  }
+  if (!result.disposalResidual.isZero) {
+    lines.push(
+      label("Left in the disposal accounts", result.disposalResidual) +
+        "  <- the proceeds given are not the ones the holder's books recorded",
     );
   }
   if (!result.eliminations.totalDifference.isZero) {
