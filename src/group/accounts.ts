@@ -13,6 +13,15 @@
  * sent and not yet arrived, and a line a reader can question rather than a
  * plug hidden inside a total.
  *
+ * The gain or loss on selling a subsidiary is a group figure for the same
+ * reason goodwill is. The company that held the shares measures its gain
+ * against what it paid for them; the group measures the same sale against the
+ * net assets that walked out of the door and the goodwill that has to come off
+ * with them, and the two figures agree only by accident. Two accounts rather
+ * than one signed account, because a loss is an expense and belongs in the
+ * expenses, the same way a bargain purchase is a gain and not negative
+ * goodwill.
+ *
  * The intercompany accounts themselves are different in kind: those belong in
  * the entities' own books, and they are here so the standard chart has them to
  * post to. A group that lends between its companies needs somewhere to record
@@ -38,6 +47,8 @@ export const GROUP_ACCOUNTS = {
   bargainGain: "4960",
   intercompanyPurchases: "5960",
   nciProfitShare: "3410",
+  disposalGain: "4970",
+  disposalLoss: "5970",
 } as const;
 
 export const CONSOLIDATION_ACCOUNTS: readonly AccountDefinition[] = [
@@ -115,6 +126,20 @@ export const CONSOLIDATION_ACCOUNTS: readonly AccountDefinition[] = [
     type: "income",
     parent: "4000",
     description: "Net assets acquired above what was paid for them",
+  },
+  {
+    code: GROUP_ACCOUNTS.disposalGain,
+    name: "Gain on Disposal of a Subsidiary",
+    type: "income",
+    parent: "4000",
+    description: "Proceeds above what the group was carrying the company at",
+  },
+  {
+    code: GROUP_ACCOUNTS.disposalLoss,
+    name: "Loss on Disposal of a Subsidiary",
+    type: "expense",
+    parent: "5000",
+    description: "What the group was carrying the company at, above the proceeds",
   },
 ];
 
