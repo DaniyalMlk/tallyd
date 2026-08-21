@@ -10,7 +10,7 @@ three invoices. That matching problem is what this project is actually about.
 
 ## Status
 
-Phases 1–13 are done; see [`ROADMAP.md`](./ROADMAP.md). The accounting core is
+Phases 1–14 are done; see [`ROADMAP.md`](./ROADMAP.md). The accounting core is
 complete and tested — money, the chart of accounts, journal entries, the ledger
 and the trial balance — and so is statement ingestion: CSV and OFX readers,
 format detection and duplicate flagging. The matching engine works end to end,
@@ -45,6 +45,12 @@ that have to eliminate against each other, and shareholders outside the group
 with a claim on companies inside it. All of that comes out as a real ledger in
 the presentation currency, one balanced journal entry per step, so every
 consolidated figure can be traced back to what put it there.
+
+The group can also change shape during the period. A company bought in April
+contributes nine months of results and a full balance sheet; one sold in
+September contributes eight months of results and no balance sheet at all. Both
+are handled, and the second is measured against what the group was carrying the
+company at rather than against what the shares cost.
 
 ## Running it
 
@@ -958,6 +964,78 @@ at the period start and get a result for the period rather than every year since
 the company was formed. The consolidation does not do that on its own: without
 an acquisition date inside the period it has no way to know a period boundary is
 missing, and guessing at one would be worse than the gap.
+
+### And one sold part-way through it
+
+The other half of the same question, and the harder one. A company sold in
+September was the group's for eight months, so its results for those eight
+months are the group's — and on the reporting date the group does not own a
+penny of it, so none of its balance sheet is.
+
+Closing the books cannot express that. Closing decides which period a result
+belongs to and leaves the balance sheet exactly where it was, and here the
+balance sheet has to go entirely. So a disposal is a *removal*. The company is
+consolidated as at the day control was lost — its trial balance read on that
+date, its result translated at the average over the window it was still the
+group's — and then one balanced entry takes the whole of that closing position
+back off: its assets and liabilities, its goodwill, and the outside stake's
+claim on it. The results stay.
+
+What falls out as the balancing figure is the gain:
+
+```
+carrying amount = net assets at disposal
+                - the outside stake's claim on them
+                + the goodwill recognised when it was bought
+
+gain            = proceeds - carrying amount
+```
+
+Each term earns its place. The net assets are read on the day control was lost,
+not at the reporting date, where they belong to somebody else. The outside
+stake's claim comes off because the group never owned that part and is not
+selling it — their claim goes *with* the company, which is a removal and not a
+remeasurement. And the goodwill goes because it only ever existed as a
+consequence of holding this company; leaving it on the balance sheet would
+assert the group still owns something it cannot name.
+
+**This is not the gain the holding company records.** Its own books compare the
+proceeds with what it paid for the shares. The group compares them with the net
+assets that have walked out of the door, which have been moving ever since:
+every pound the subsidiary earned and kept raised them, and the group's share of
+every one of those pounds has already been reported as profit in this period or
+an earlier one. Reporting the holder's figure as well would report the same
+earnings twice. So the consolidation reverses the holder's gain and puts its own
+in its place. `npm run demo:disposal` prints both:
+
+```
+  Proceeds                                               600000.00
+  Less what the holder paid for the shares              -400000.00
+  The holder's own gain                                  200000.00
+
+  Proceeds                                               600000.00
+  Less net assets handed over                           -500000.00
+  Add back the outside stake's claim on them             100000.00
+  Less goodwill derecognised                            -120000.00
+  The group's gain                                        80000.00
+```
+
+The 120,000 between them is the group's 80% share of the 150,000 the company
+earned and retained between purchase and sale.
+
+Two consequences worth knowing. The proceeds a group document declares and the
+proceeds the holder's own books recorded are the same event, so if they disagree
+the difference is left sitting in the disposal accounts and named:
+`disposalResidual`, printed as *"the proceeds given are not the ones the holder's
+books recorded"*. And which disposals belong in a set of accounts is decided by
+the control window, not by the list: the same document produces a comparative
+column for the year before the sale, and accounting for the sale in that column
+would take a company off a balance sheet it was still on.
+
+A company sold *before* the period opened is not an error. It is not
+consolidated, for the same reason an associate is not, and it says so beside
+them — otherwise a comparative column spanning the sale could not be produced at
+all.
 
 ## Using it as a library
 
