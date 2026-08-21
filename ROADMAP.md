@@ -230,7 +230,7 @@ all disagree slightly.
 | `src/group/disposal.ts` | What a company was carried at, and what it sold for |
 | `src/demo/disposal.ts` | A company sold in September, removed and the gain measured |
 
-1901 tests across 79 files, typecheck clean.
+1904 tests across 79 files, typecheck clean.
 
 ## Known gaps
 
