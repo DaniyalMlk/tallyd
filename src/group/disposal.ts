@@ -99,8 +99,15 @@ export interface Disposal {
   /** All figures below are in the group's presentation currency. */
   readonly proceeds: Money;
   readonly netAssetsAtDisposal: Money;
-  /** True when the net assets came from a figure supplied rather than the books. */
-  readonly netAssetsSupplied: boolean;
+  /**
+   * Where that figure came from. `books` is the entity's own trial balance on
+   * the day, translated in one step. `consolidated` is the same position as
+   * the consolidation itself carries it, row by row — which is what the
+   * disposal entry has to remove, and which can differ from `books` by a few
+   * minor units once several rows have each been rounded. `supplied` is a
+   * figure the caller gave.
+   */
+  readonly netAssetsBasis: "books" | "consolidated" | "supplied";
   /** The outside stake's claim on the day it went, goodwill attributed to it included. */
   readonly nciAtDisposal: Money;
   /** The goodwill that has to come off with the company. */
@@ -129,6 +136,13 @@ export interface DisposalOptions {
   rates: RateTable;
   presentation: Currency;
   rounding?: RoundingMode;
+  /**
+   * The net assets of each entity as the consolidation itself measures them,
+   * by entity code. Taken in preference to the entity's own books, so that the
+   * figure removed from the group's balance sheet and the figure the gain is
+   * explained by are one figure rather than two that agree to within a penny.
+   */
+  netAssetsAsConsolidated?: ReadonlyMap<string, Money>;
 }
 
 function intoPresentation(
@@ -208,7 +222,8 @@ export function disposalOf(
   );
 
   let netAssetsAtDisposal: Money;
-  let netAssetsSupplied: boolean;
+  let netAssetsBasis: "books" | "consolidated" | "supplied";
+  const asConsolidated = options.netAssetsAsConsolidated?.get(entity.code);
   if (input.netAssetsAtDisposal !== undefined) {
     netAssetsAtDisposal = intoPresentation(
       input.netAssetsAtDisposal,
@@ -216,7 +231,10 @@ export function disposalOf(
       disposed,
       `The net assets of ${entity.code} on disposal`,
     );
-    netAssetsSupplied = true;
+    netAssetsBasis = "supplied";
+  } else if (asConsolidated !== undefined) {
+    netAssetsAtDisposal = asConsolidated;
+    netAssetsBasis = "consolidated";
   } else {
     const ledger =
       ledgers instanceof Map
@@ -233,7 +251,7 @@ export function disposalOf(
       disposed,
       `The net assets of ${entity.code}`,
     );
-    netAssetsSupplied = false;
+    netAssetsBasis = "books";
   }
 
   // The outside stake's claim is its share of the net assets now, plus whatever
@@ -257,7 +275,7 @@ export function disposalOf(
     nonControllingInterest: nci,
     proceeds,
     netAssetsAtDisposal,
-    netAssetsSupplied,
+    netAssetsBasis,
     nciAtDisposal,
     goodwillDerecognised,
     carryingAmount,
@@ -324,7 +342,7 @@ export function renderDisposal(disposal: Disposal): string {
   lines.push(label("Proceeds", disposal.proceeds));
   lines.push(
     label(
-      `Net assets going with it${disposal.netAssetsSupplied ? " (supplied)" : ""}`,
+      `Net assets going with it${disposal.netAssetsBasis === "supplied" ? " (supplied)" : ""}`,
       disposal.netAssetsAtDisposal.negated(),
     ),
   );

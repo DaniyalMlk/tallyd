@@ -131,7 +131,7 @@ describe("the pieces of a carrying amount", () => {
   });
 
   it("says the net assets came from the books rather than from a figure supplied", () => {
-    expect(disposal.netAssetsSupplied).toBe(false);
+    expect(disposal.netAssetsBasis).toBe("books");
   });
 });
 
@@ -262,7 +262,7 @@ describe("a figure supplied rather than read", () => {
     const disposal = disposalFor({
       netAssetsAtDisposal: Money.parse("450000.00", GBP),
     });
-    expect(disposal.netAssetsSupplied).toBe(true);
+    expect(disposal.netAssetsBasis).toBe("supplied");
     expect(disposal.netAssetsAtDisposal).toEqual(Money.parse("450000.00", GBP));
     expect(disposal.nciAtDisposal).toEqual(Money.parse("90000.00", GBP));
     expect(disposal.carryingAmount).toEqual(Money.parse("480000.00", GBP));
