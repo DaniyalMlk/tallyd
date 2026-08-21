@@ -121,13 +121,32 @@ all disagree slightly.
       symptom is a negative figure for reserves earned since control was
       obtained.
 
-- [ ] **14 — Sold part-way through the year.** The other half of the same
+- [x] **14 — Sold part-way through the year.** The other half of the same
       question, and the harder one. A company sold in September contributes
       eight months of results and no balance sheet at all, so it cannot be
-      handled by closing its books and adding them in: it has to be added in and
-      then taken back out, with the difference between what it was carried at
-      and what it sold for recognised as a gain or loss on disposal, and the
-      outside stake's claim on it removed rather than remeasured.
+      handled by closing its books and adding them in: closing decides which
+      period a result belongs to and leaves the balance sheet where it was.
+      Instead the control window gains a far end and a second date — the date
+      the entity's own position is read at — so the company is consolidated as
+      at the day control was lost and then taken back out in one balanced entry:
+      its assets and liabilities, its goodwill, and the outside stake's claim on
+      it, with the group's gain or loss falling out as the balancing figure. Not
+      the holder's gain, which is measured against the cost of the shares and
+      already contains earnings the group has reported; the holder's figure is
+      reversed and the group's put in its place, with any disagreement between
+      the proceeds declared and the proceeds the books recorded left named
+      rather than absorbed. Which disposals belong in a set of accounts is the
+      window's decision and not the list's, so the same document still produces
+      a comparative column for the year before the sale — and a company that
+      left before the period opened is not consolidated at all, which is a fact
+      about a period rather than an error.
+
+- [ ] **15 — What the group sells itself.** Unrealised profit on goods one group
+      company has sold to another and which are still in stock. The trading is
+      already taken out and the margin sitting inside the buyer's inventory is
+      not, so consolidated stock is carried at what the group charged itself
+      rather than at what it cost — which overstates both inventory and the
+      reserves that put it there, and does so by an amount nobody can see.
 
 ## Current state
 
@@ -208,8 +227,10 @@ all disagree slightly.
 | `src/ledger/close.ts` | The income accounts taken to reserves at a date, as an entry |
 | `src/group/timeline.ts` | How much of the period each entity was the group's |
 | `src/demo/midYear.ts` | A company bought in April, consolidated both ways |
+| `src/group/disposal.ts` | What a company was carried at, and what it sold for |
+| `src/demo/disposal.ts` | A company sold in September, removed and the gain measured |
 
-1762 tests across 74 files, typecheck clean.
+1901 tests across 79 files, typecheck clean.
 
 ## Known gaps
 
@@ -282,16 +303,39 @@ all disagree slightly.
   subsidiary is measured against what the subsidiary paid, in full. The
   alternative treatment, which scales that cost by the group's interest in the
   buyer, is not available.
+- An entity acquired part-way through the period still has its result translated
+  at the average rate over the whole period rather than over the window it was
+  the group's for. A disposal does use the window, because the months after a
+  sale are not the group's and neither are their rates; the two ends should
+  agree and do not.
 - Nothing verifies that an entity's books were closed at the start of the
   reporting period. Where they were not, and no acquisition date falls inside
   the period to give the consolidation a reason to close them, the result is
   overstated and nothing says so.
-- A company sold part-way through the period cannot be expressed. Acquisition
-  is handled by closing the books at the date control was obtained, and
-  disposal cannot be: the entity has to be added in for part of the period and
-  then taken back out of the closing balance sheet entirely, with a gain or
-  loss on disposal and the outside stake's claim removed rather than
-  remeasured.
+- The translation reserve is not recycled on the sale of a foreign operation.
+  The cumulative exchange differences on it should come out of reserves and into
+  the gain, and *cumulative* is the word: the consolidation measures one
+  period's translation adjustment and has never carried the running total, which
+  is a fact about several previous years of rates that no single reporting date
+  supplies.
+- A partial disposal cannot be expressed. Selling 80% down to 30% loses control
+  and leaves a holding; selling down to 60% loses nothing and is a transaction
+  between owners rather than a disposal at all. Both need the retained interest
+  measured at fair value, which is a figure only the group has, and neither is
+  the same entry as walking away entirely.
+- The proceeds a disposal declares and the proceeds the holder's own books
+  recorded are checked against each other only after the fact. The difference is
+  reported as `disposalResidual` and named on the face of the workings, which is
+  better than absorbing it, but nothing refuses the consolidation: a set of
+  accounts describing the same sale two ways still balances and still runs.
+- A disposal assumes the holder has already derecognised the investment in its
+  own books. Where it has not, the entry puts back an investment that was never
+  taken off and the surplus shows up in `investmentResidual` — flagged, but
+  flagged rather than prevented.
+- The movement schedules name the outside stake's removal on a disposal and stop
+  there. Goodwill and the group's own reserves get a comparative column and an
+  arithmetic movement across a sale, and no schedule saying which part of it was
+  the disposal.
 - Books that have never been closed to reserves still hand the group every
   year's profit at once. `withResultClosed` will fix them and the caller has to
   ask: without an acquisition date inside the period there is nothing to tell
