@@ -26,7 +26,7 @@
 
 import type { Currency } from "../money/currency.js";
 import { currency as lookupCurrency } from "../money/currency.js";
-import { type CalendarDate, date as parseDate } from "../ledger/date.js";
+import { type CalendarDate, compareDates, date as parseDate } from "../ledger/date.js";
 import { Interest } from "./interest.js";
 
 export class GroupError extends Error {
@@ -69,6 +69,13 @@ export interface EntityDefinition {
   controlled?: boolean;
   /** The day control was obtained. Needed to split pre- from post-acquisition. */
   acquired?: string;
+  /**
+   * The day control was lost. An entity carrying one is still in the group's
+   * structure — it was the group's for part of the period and its results are
+   * the group's for that part — but it has no balance sheet at the reporting
+   * date, because on that date the group did not own it.
+   */
+  disposed?: string;
   description?: string;
 }
 
@@ -95,6 +102,8 @@ export interface Entity {
   /** The largest-interest chain from the parent company, for rendering. */
   readonly chain: readonly string[];
   readonly acquired: CalendarDate | null;
+  /** The day control was lost, where the group has parted with the company. */
+  readonly disposed: CalendarDate | null;
   readonly description: string;
   readonly heldEntities: readonly string[];
 }
@@ -154,6 +163,18 @@ export class GroupStructure {
       }
       if (definition.parent === undefined && definition.holding !== undefined) {
         throw new GroupError(`Entity ${code} declares a holding but says nothing about who holds it`);
+      }
+      // A company sold before it was bought is not a short holding period, it is
+      // two dates the wrong way round, and everything downstream would read it
+      // as a window with negative length.
+      if (definition.acquired !== undefined && definition.disposed !== undefined) {
+        const bought = parseDate(definition.acquired);
+        const sold = parseDate(definition.disposed);
+        if (compareDates(sold, bought) === -1) {
+          throw new GroupError(
+            `Entity ${code} was disposed of on ${sold}, before it was acquired on ${bought}`,
+          );
+        }
       }
 
       const declared: HoldingDefinition[] =
@@ -312,6 +333,7 @@ export class GroupStructure {
           depth: depth.get(code) as number,
           chain: chain.get(code) as readonly string[],
           acquired: definition.acquired === undefined ? null : parseDate(definition.acquired),
+          disposed: definition.disposed === undefined ? null : parseDate(definition.disposed),
           description: definition.description ?? "",
           heldEntities: Object.freeze((held.get(code) ?? []).sort()),
         }),
@@ -386,6 +408,17 @@ export class GroupStructure {
     return this.list().filter((e) => !e.controlled);
   }
 
+  /**
+   * The entities the group has parted with, whenever that happened.
+   *
+   * Whether any of them belongs in a particular set of accounts is a question
+   * about a period and not about the structure, so it is answered by the
+   * control window rather than here.
+   */
+  disposedEntities(): readonly Entity[] {
+    return this.list().filter((e) => e.disposed !== null);
+  }
+
   /** Entities with a non-controlling interest in them. */
   withNonControllingInterest(): readonly Entity[] {
     return this.consolidated().filter((e) => !e.nonControlling.isZero);
@@ -426,8 +459,9 @@ export class GroupStructure {
           ? ""
           : `, ${entity.nonControlling.toPercentString(4)} outside`
         : ", not controlled";
+      const gone = entity.disposed === null ? "" : `, sold ${entity.disposed}`;
       lines.push(
-        `${entity.code.padEnd(8)}${label.padEnd(width)}${entity.currency.code.padEnd(5)}${share}${flag}`,
+        `${entity.code.padEnd(8)}${label.padEnd(width)}${entity.currency.code.padEnd(5)}${share}${flag}${gone}`,
       );
     }
     return lines.join("\n");
