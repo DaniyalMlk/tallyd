@@ -21,6 +21,14 @@ export {
   renderAcquisition,
 } from "./acquisition.js";
 export {
+  type Disposal,
+  type DisposalInput,
+  type DisposalOptions,
+  disposalOf,
+  disposals,
+  renderDisposal,
+} from "./disposal.js";
+export {
   type Consolidation,
   type ConsolidationOptions,
   type SubsidiaryWorking,
