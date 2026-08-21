@@ -296,10 +296,19 @@ export function consolidate(
       sumRows(aggregation, c.entity, ["asset", "liability", null]),
     ]),
   );
+  // Which disposals belong in *this* period is a question for the control
+  // window and not for the list. The same group document produces a
+  // comparative column for the year before the sale, and accounting for the
+  // sale in that column would take a company off a balance sheet it was still
+  // on. So the window decides: a disposal is accounted for when, and only
+  // when, control was lost on or inside the period being reported.
+  const leftDuringPeriod = new Set(
+    aggregation.entities.filter((c) => c.control.disposedDuring).map((c) => c.entity),
+  );
   const sold = disposals(
     group,
     ledgers,
-    (options.disposals ?? []).filter((input) => contributed.has(input.entity)),
+    (options.disposals ?? []).filter((input) => leftDuringPeriod.has(input.entity)),
     acquired,
     { rates: options.rates, presentation, rounding, netAssetsAsConsolidated: netAssetsByEntity },
   );
@@ -604,7 +613,7 @@ export function renderConsolidation(result: Consolidation): string {
     `${result.group.name} — consolidated as at ${result.asAt} in ${result.presentation.code}`,
   );
   lines.push(
-    `${result.group.consolidated().length} entities consolidated, ` +
+    `${result.aggregation.entities.length} entities consolidated, ` +
       `${result.eliminations.pairs.length} intercompany ${
         result.eliminations.pairs.length === 1 ? "pair" : "pairs"
       } eliminated, ` +
@@ -719,6 +728,13 @@ export function renderConsolidation(result: Consolidation): string {
   }
   for (const item of result.eliminations.unmatched) {
     lines.push(`Unpaired: ${item.side.entity} ${item.side.account} — ${item.reason}`);
+  }
+  // An entity in the group document that did not go in. The combined trial
+  // balance says so too, and a reader who did not ask for it should still be
+  // told: a set of accounts covering one fewer company than the group has is
+  // not something to discover by counting.
+  for (const skipped of result.aggregation.excluded) {
+    lines.push(`Not consolidated: ${skipped.entity} — ${skipped.reason}`);
   }
   return lines.join("\n");
 }
