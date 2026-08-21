@@ -17,6 +17,7 @@
     "demo:group": "vite-node src/demo/mainGroup.ts",
     "demo:periods": "vite-node src/demo/mainGroupPeriods.ts",
     "demo:midyear": "vite-node src/demo/mainMidYear.ts",
+    "demo:disposal": "vite-node src/demo/mainDisposal.ts",
     "cli": "vite-node src/cli/main.ts --",
     "bench": "vite-node src/cli/main.ts -- bench",
     "generate": "vite-node src/cli/main.ts -- generate"

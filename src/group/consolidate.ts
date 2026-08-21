@@ -8,7 +8,7 @@
  * and checked. Nothing is adjusted invisibly. If a figure in the consolidated
  * balance sheet is wrong, there is an entry with a narration that put it there.
  *
- * Four kinds of entry go in, in order.
+ * Five kinds of entry go in, in order.
  *
  * 1. **One per entity**, carrying its translated trial balance. It balances
  *    because the translation adjustment is posted with it, to the translation
@@ -27,6 +27,15 @@
  *    still right and the presentation is wrong: the whole profit would read as
  *    the group's, and the reserves brought forward would be short by exactly
  *    the same amount.
+ * 5. **One per company the group sold during the period**, taking back off the
+ *    closing position the first three entries have just put on. A company sold
+ *    in September is consolidated as at September — eight months of results and
+ *    the balance sheet it had on the day — and then that balance sheet, its
+ *    goodwill and the outside stake's claim on it are removed in one step. The
+ *    results stay. What falls out as the balancing figure is the group's gain
+ *    or loss on the sale, and it comes to exactly
+ *    `proceeds - (net assets - the outside stake + goodwill)`, which the tests
+ *    check rather than assume.
  *
  * The non-controlling interest's claim is computed as its share of the net
  * assets now, plus whatever goodwill was attributed to it at acquisition. That
@@ -58,6 +67,7 @@ import type { AverageMethod } from "../fx/average.js";
 import { type Aggregation, type AggregationOptions, type EntityLedgers, aggregate } from "./aggregate.js";
 import { CONSOLIDATION_ACCOUNTS, GROUP_ACCOUNTS } from "./accounts.js";
 import { type Acquisition, type AcquisitionInput, acquisitions } from "./acquisition.js";
+import { type Disposal, type DisposalInput, disposals } from "./disposal.js";
 import {
   type EliminationOptions,
   type Eliminations,
@@ -84,6 +94,26 @@ export interface SubsidiaryWorking {
   readonly postAcquisitionReserves: Money;
 }
 
+/** A company that left the group, and what removing it did. */
+export interface DisposalWorking {
+  readonly entity: string;
+  readonly disposal: Disposal;
+  /** The assets and liabilities taken back off the group's balance sheet. */
+  readonly netAssetsRemoved: Money;
+  /** The outside stake's claim removed with them. */
+  readonly nciRemoved: Money;
+  /** The goodwill that went with the company. */
+  readonly goodwillRemoved: Money;
+  /**
+   * The balancing figure on the disposal entry, credit-positive. Equal to
+   * `proceeds - carrying amount` by construction, which is asserted rather
+   * than assumed.
+   */
+  readonly result: Money;
+  /** The entity's result for the part of the period it was still the group's. */
+  readonly resultToDisposal: Money;
+}
+
 export interface Consolidation {
   readonly group: GroupStructure;
   readonly presentation: Currency;
@@ -92,6 +122,9 @@ export interface Consolidation {
   readonly aggregation: Aggregation;
   readonly eliminations: Eliminations;
   readonly workings: readonly SubsidiaryWorking[];
+  readonly disposals: readonly DisposalWorking[];
+  /** The gain on companies sold during the period, less the losses. */
+  readonly disposalResult: Money;
   /** The consolidated books: every step above, as entries. */
   readonly ledger: Ledger;
   readonly chart: ChartOfAccounts;
@@ -102,6 +135,14 @@ export interface Consolidation {
   readonly translationReserve: Money;
   /** Left in the investment account after the eliminations, which should be nil. */
   readonly investmentResidual: Money;
+  /**
+   * What the disposal accounts carry over and above the group's own gain,
+   * credit-positive. Nil when the proceeds the consolidation was told about are
+   * the proceeds the holder's books recorded; anything else means the two
+   * disagree about the same sale, and the difference is sitting in the income
+   * statement looking like a result.
+   */
+  readonly disposalResidual: Money;
   /** Assets less liabilities less equity less the result. Nil when it hangs together. */
   readonly residual: Money;
   readonly balanced: boolean;
@@ -116,6 +157,7 @@ export interface ConsolidationOptions {
   rounding?: RoundingMode;
   intercompany?: readonly IntercompanyDeclaration[];
   acquisitions?: readonly AcquisitionInput[];
+  disposals?: readonly DisposalInput[];
   /** Where an entity's pre-acquisition result goes. Retained earnings by default. */
   reserves?: string;
   /**
@@ -240,6 +282,37 @@ export function consolidate(
     rounding,
   });
 
+  // An entity the aggregation left out — an associate, or a company sold
+  // before this period opened — has no equity on the page to eliminate an
+  // investment against, so its acquisition is not accounted for here either.
+  const contributed = new Set(aggregation.entities.map((c) => c.entity));
+
+  // The net assets of each entity as this consolidation carries them, so that
+  // a disposal removes exactly what was added rather than something measured
+  // again from the same books by a different route.
+  const netAssetsByEntity = new Map<string, Money>(
+    aggregation.entities.map((c) => [
+      c.entity,
+      sumRows(aggregation, c.entity, ["asset", "liability", null]),
+    ]),
+  );
+  // Which disposals belong in *this* period is a question for the control
+  // window and not for the list. The same group document produces a
+  // comparative column for the year before the sale, and accounting for the
+  // sale in that column would take a company off a balance sheet it was still
+  // on. So the window decides: a disposal is accounted for when, and only
+  // when, control was lost on or inside the period being reported.
+  const leftDuringPeriod = new Set(
+    aggregation.entities.filter((c) => c.control.disposedDuring).map((c) => c.entity),
+  );
+  const sold = disposals(
+    group,
+    ledgers,
+    (options.disposals ?? []).filter((input) => leftDuringPeriod.has(input.entity)),
+    acquired,
+    { rates: options.rates, presentation, rounding, netAssetsAsConsolidated: netAssetsByEntity },
+  );
+
   const entries: JournalEntry[] = [];
 
   // ------------------------------------------- 1. each entity's own position
@@ -279,6 +352,7 @@ export function consolidate(
   // ------------------------------- 3 and 4. investment, goodwill, the outside stake
   const workings: SubsidiaryWorking[] = [];
   for (const acquisition of acquired) {
+    if (!contributed.has(acquisition.entity)) continue;
     const entity = group.get(acquisition.entity);
     const equityRows = (
       aggregation.entities.find((c) => c.entity === entity.code)?.translation.rows ?? []
@@ -388,10 +462,121 @@ export function consolidate(
     );
   }
 
+  // -------------------------------------------- 5. the companies that have gone
+  //
+  // Everything above has just consolidated a company the group no longer owns,
+  // as at the day it went: its balance sheet is on the page, its goodwill has
+  // been recognised, and the outside stake has a claim on it. All three have to
+  // come back off, and what falls out of taking them off is the gain.
+  //
+  // Two of the postings are undoings rather than removals, and they are there
+  // because the holding company's own books have already recorded the sale.
+  // The investment is put back because the elimination above credited an
+  // account the holder no longer carries anything in; and the holder's own gain
+  // is reversed because it is measured against what the shares cost, which is
+  // not what the group is giving up.
+  const disposalWorkings: DisposalWorking[] = [];
+  for (const disposal of sold) {
+    const entity = group.get(disposal.entity);
+    const rows = (
+      aggregation.entities.find((c) => c.entity === entity.code)?.translation.rows ?? []
+    ).filter(
+      (row) =>
+        (row.type === "asset" || row.type === "liability" || row.type === null) &&
+        !row.presentation.isZero,
+    );
+    const postings: PostingInput[] = rows.map((row) => ({
+      account: row.account,
+      amount: row.presentation.negated(),
+      memo: `${entity.code} at ${disposal.disposed}, out with the company`,
+    }));
+    if (!disposal.goodwillDerecognised.isZero) {
+      postings.push({
+        account: GROUP_ACCOUNTS.goodwill,
+        amount: disposal.goodwillDerecognised.negated(),
+        memo: `nothing left for the goodwill on ${entity.code} to attach to`,
+      });
+    }
+    if (!disposal.nciAtDisposal.isZero) {
+      postings.push({
+        account: GROUP_ACCOUNTS.nonControllingInterest,
+        amount: disposal.nciAtDisposal,
+        memo: `the outside stake's claim on ${entity.code} goes with it`,
+      });
+    }
+    const consideration = disposal.proceeds.minus(disposal.holderResult);
+    if (!consideration.isZero) {
+      postings.push({
+        account: disposal.investmentAccount,
+        amount: consideration,
+        memo: `${entity.code} is no longer on the holder's books at what was paid for it`,
+      });
+    }
+    if (!disposal.holderResult.isZero) {
+      postings.push({
+        account: disposal.holderAccount,
+        amount: disposal.holderResult,
+        memo: `what the holder made on ${entity.code} against the cost of the shares, reversed`,
+      });
+    }
+    const balancing = postings.reduce((running, p) => running.plus(p.amount), zero).negated();
+    if (!balancing.isZero) {
+      postings.push({
+        account: disposal.account,
+        amount: balancing,
+        memo: `proceeds of ${disposal.proceeds.toDecimalString()} against a carrying amount of ${disposal.carryingAmount.toDecimalString()}`,
+      });
+    }
+    if (postings.length > 0) {
+      entries.push(
+        JournalEntry.create(
+          {
+            id: `DISP-${entity.code}`,
+            date: aggregation.asAt,
+            narration: `Remove ${entity.name}, disposed of ${disposal.disposed}`,
+            postings,
+            tags: ["consolidation", "disposal"],
+          },
+          chart,
+        ),
+      );
+    }
+    disposalWorkings.push(
+      Object.freeze({
+        entity: entity.code,
+        disposal,
+        netAssetsRemoved: rows.reduce((running, row) => running.plus(row.presentation), zero),
+        nciRemoved: disposal.nciAtDisposal,
+        goodwillRemoved: disposal.goodwillDerecognised,
+        result: balancing.negated(),
+        resultToDisposal: sumRows(aggregation, entity.code, ["income", "expense"]).negated(),
+      }),
+    );
+  }
+
   const ledger = Ledger.from(entries, chart);
   const tb = trialBalance(ledger, { currency: presentation, asAt: aggregation.asAt });
 
   const balanceOf = (code: string): Money => ledger.balanceOf(code, presentation);
+
+  const disposalResult = sumMoney(
+    disposalWorkings.map((w) => w.result),
+    presentation,
+  );
+  // The disposal accounts should end up carrying the group's gain and nothing
+  // else: the holder's own figure went in from its trial balance and came
+  // straight back out. A residue means the proceeds this consolidation was
+  // given are not the proceeds the holder's books recorded — the same sale
+  // described two ways, with the difference left in the income statement.
+  const disposalAccounts = new Set(
+    disposalWorkings.flatMap((w) => [w.disposal.account, w.disposal.holderAccount]),
+  );
+  const disposalResidual = sumMoney(
+    [...disposalAccounts].map((code) => balanceOf(code)),
+    presentation,
+  )
+    .plus(disposalResult)
+    .negated();
 
   return Object.freeze({
     group,
@@ -401,6 +586,9 @@ export function consolidate(
     aggregation,
     eliminations,
     workings: Object.freeze(workings),
+    disposals: Object.freeze(disposalWorkings),
+    disposalResult,
+    disposalResidual,
     ledger,
     chart,
     trialBalance: tb,
@@ -425,7 +613,7 @@ export function renderConsolidation(result: Consolidation): string {
     `${result.group.name} — consolidated as at ${result.asAt} in ${result.presentation.code}`,
   );
   lines.push(
-    `${result.group.consolidated().length} entities consolidated, ` +
+    `${result.aggregation.entities.length} entities consolidated, ` +
       `${result.eliminations.pairs.length} intercompany ${
         result.eliminations.pairs.length === 1 ? "pair" : "pairs"
       } eliminated, ` +
@@ -457,25 +645,78 @@ export function renderConsolidation(result: Consolidation): string {
         );
       }
     }
+    // For a company the group still holds, these are figures at the reporting
+    // date. For one it sold they are figures at the date it went, and saying
+    // "now" about them would be saying something untrue about a company the
+    // group does not own.
+    const readAt = contribution?.readAt;
+    const gone = control?.disposedDuring === true;
     lines.push(label("Goodwill", working.acquisition.goodwill));
-    lines.push(label("Net assets now", working.netAssetsNow));
+    lines.push(label(gone ? `Net assets at ${readAt}` : "Net assets now", working.netAssetsNow));
     lines.push(label("Result for the period", working.profitForPeriod));
     if (!working.acquisition.nonControllingInterest.isZero) {
       lines.push(label("Outside stake's share of the result", working.nciProfitShare));
-      lines.push(label("Outside stake at the reporting date", working.nciClosing));
+      lines.push(
+        label(
+          gone ? `Outside stake at ${readAt}` : "Outside stake at the reporting date",
+          working.nciClosing,
+        ),
+      );
     }
     lines.push(label("Group's post-acquisition reserves", working.postAcquisitionReserves));
     lines.push("");
   }
+  for (const working of result.disposals) {
+    const disposal = working.disposal;
+    lines.push(
+      `${working.entity} — ${result.group.get(working.entity).name}, ` +
+        `disposed of ${disposal.disposed}`,
+    );
+    lines.push(
+      `  Consolidated to ${disposal.disposed} and then removed: the group's result includes ` +
+        `what it earned up to that day and its balance sheet none of what it owned.`,
+    );
+    lines.push(label("Result while it was still the group's", working.resultToDisposal));
+    lines.push(label("Net assets removed", working.netAssetsRemoved.negated()));
+    if (!working.nciRemoved.isZero) {
+      lines.push(label("  outside stake's claim removed with them", working.nciRemoved));
+    }
+    if (!working.goodwillRemoved.isZero) {
+      lines.push(label("Goodwill derecognised", working.goodwillRemoved.negated()));
+    }
+    lines.push(label("Proceeds", disposal.proceeds));
+    lines.push(
+      working.result.isNegative
+        ? label("Loss on disposal", working.result.negated())
+        : label("Gain on disposal", working.result),
+    );
+    lines.push("");
+  }
+
   lines.push("The group");
   lines.push(label("Goodwill", result.goodwill));
   if (!result.bargainGain.isZero) lines.push(label("Gain on a bargain purchase", result.bargainGain));
+  if (!result.disposalResult.isZero) {
+    lines.push(
+      result.disposalResult.isNegative
+        ? label("Loss on disposals", result.disposalResult.negated())
+        : label("Gain on disposals", result.disposalResult),
+    );
+  }
   lines.push(label("Non-controlling interest", result.nonControllingInterest));
   lines.push(label("Translation reserve", result.translationReserve));
   if (!result.investmentResidual.isZero) {
     lines.push(
       label("Investment left uneliminated", result.investmentResidual) +
-        "  <- the books carry it at something other than what was paid",
+        (result.disposals.length > 0
+          ? "  <- a disposal assumes the holder's own books already record the sale"
+          : "  <- the books carry it at something other than what was paid"),
+    );
+  }
+  if (!result.disposalResidual.isZero) {
+    lines.push(
+      label("Left in the disposal accounts", result.disposalResidual) +
+        "  <- the proceeds given are not the ones the holder's books recorded",
     );
   }
   if (!result.eliminations.totalDifference.isZero) {
@@ -487,6 +728,13 @@ export function renderConsolidation(result: Consolidation): string {
   }
   for (const item of result.eliminations.unmatched) {
     lines.push(`Unpaired: ${item.side.entity} ${item.side.account} — ${item.reason}`);
+  }
+  // An entity in the group document that did not go in. The combined trial
+  // balance says so too, and a reader who did not ask for it should still be
+  // told: a set of accounts covering one fewer company than the group has is
+  // not something to discover by counting.
+  for (const skipped of result.aggregation.excluded) {
+    lines.push(`Not consolidated: ${skipped.entity} — ${skipped.reason}`);
   }
   return lines.join("\n");
 }

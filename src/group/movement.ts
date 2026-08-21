@@ -316,6 +316,17 @@ export function nciSchedule(
     { label: "Share of the translation effect", amount: total((m) => m.shareOfTranslation) },
     { label: "Share of other movements in net assets", amount: total((m) => m.shareOfOther) },
     { label: "Arising on acquisition", amount: total((m) => m.arisingOnAcquisition) },
+    // The mirror of arising on acquisition. A stake in a company that has left
+    // the group is not remeasured to nil, it is removed, and naming the line
+    // is the difference between a schedule that explains itself and one that
+    // leaves a large figure under "not explained by the above".
+    {
+      label: "Removed with a company disposed of",
+      amount: sumMoney(
+        current.disposals.map((disposal) => disposal.nciRemoved.negated()),
+        presentation,
+      ),
+    },
   ].filter((line) => !line.amount.isZero);
 
   const closing = current.nonControllingInterest;

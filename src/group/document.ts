@@ -2,9 +2,10 @@
  * The group as a file.
  *
  * A consolidation needs more than a pile of ledgers: it needs to know who
- * holds whom and on what terms, which balances face which company, and what
- * was paid for each subsidiary and when. None of that is in any entity's own
- * books, and none of it can be inferred from them. So it is a document, and
+ * holds whom and on what terms, which balances face which company, what was
+ * paid for each subsidiary and when, and what any that have left were sold
+ * for. None of that is in any entity's own books, and none of it can be
+ * inferred from them. So it is a document, and
  * like the ledger document it is validated on the way in and says what is
  * wrong with it rather than failing somewhere further down.
  *
@@ -19,6 +20,7 @@ import { type DateRange, dateRange, isValidDate } from "../ledger/date.js";
 import type { AverageMethod } from "../fx/average.js";
 import { type EntityDefinition, GroupStructure } from "./structure.js";
 import type { AcquisitionInput, NciMeasurement } from "./acquisition.js";
+import type { DisposalInput } from "./disposal.js";
 import type { IntercompanyDeclaration } from "./intercompany.js";
 
 export class GroupDocumentError extends Error {
@@ -34,6 +36,7 @@ export interface ParsedGroup {
   readonly ledgers: ReadonlyMap<string, string>;
   readonly intercompany: readonly IntercompanyDeclaration[];
   readonly acquisitions: readonly AcquisitionInput[];
+  readonly disposals: readonly DisposalInput[];
   readonly asAt: string | null;
   readonly period: DateRange | null;
   readonly averageMethod: AverageMethod | null;
@@ -115,6 +118,10 @@ function entityFrom(value: unknown, index: number): { definition: EntityDefiniti
   const acquired = value["acquired"];
   if (acquired !== undefined && acquired !== null) {
     definition.acquired = requireDate(acquired, `Entity ${code}'s acquisition date`);
+  }
+  const disposed = value["disposed"];
+  if (disposed !== undefined && disposed !== null) {
+    definition.disposed = requireDate(disposed, `Entity ${code}'s disposal date`);
   }
   const description = optionalString(value["description"], `Entity ${code}'s description`);
   if (description !== undefined) definition.description = description;
@@ -216,6 +223,55 @@ export function groupFromDocument(document: unknown): ParsedGroup {
     throw new GroupDocumentError("acquisitions must be a list");
   }
 
+  const disposalsRaw = document["disposals"];
+  const disposalInputs: DisposalInput[] = [];
+  if (Array.isArray(disposalsRaw)) {
+    disposalsRaw.forEach((value, index) => {
+      if (!isObject(value)) throw new GroupDocumentError(`Disposal ${index} is not an object`);
+      const entity = requireString(value["entity"], `Disposal ${index}'s entity`);
+      const input: DisposalInput = {
+        entity,
+        proceeds: requireMoney(value["proceeds"], `The proceeds of ${entity}`),
+      };
+      const disposed = value["disposed"];
+      if (disposed !== undefined && disposed !== null) {
+        input.disposed = requireDate(disposed, `The disposal date for ${entity}`);
+      }
+      if (value["netAssetsAtDisposal"] !== undefined && value["netAssetsAtDisposal"] !== null) {
+        input.netAssetsAtDisposal = requireMoney(
+          value["netAssetsAtDisposal"],
+          `The net assets going out with ${entity}`,
+        );
+      }
+      const gainAccount = optionalString(value["gainAccount"], `${entity}'s gain account`);
+      if (gainAccount !== undefined) input.gainAccount = gainAccount;
+      const lossAccount = optionalString(value["lossAccount"], `${entity}'s loss account`);
+      if (lossAccount !== undefined) input.lossAccount = lossAccount;
+      disposalInputs.push(input);
+    });
+  } else if (disposalsRaw !== undefined && disposalsRaw !== null) {
+    throw new GroupDocumentError("disposals must be a list");
+  }
+
+  // A disposal declared for a company the structure says is still held would
+  // consolidate its balance sheet at the reporting date and then remove it,
+  // which is neither treatment. The two have to agree, and saying so here is
+  // cheaper than a set of accounts that balances and is wrong.
+  for (const input of disposalInputs) {
+    if (input.disposed !== undefined) continue;
+    if (!structure.has(input.entity)) {
+      throw new GroupDocumentError(
+        `${input.entity} is disposed of but is not an entity in this group`,
+      );
+    }
+    if (structure.get(input.entity).disposed === null) {
+      throw new GroupDocumentError(
+        `${input.entity} has a disposal but no "disposed" date on the entity, so nothing ` +
+          `tells the consolidation which part of the period it was still the group's.`,
+      );
+    }
+  }
+
   const asAtRaw = document["asAt"];
   const asAt = asAtRaw === undefined || asAtRaw === null ? null : requireDate(asAtRaw, "asAt");
 
@@ -244,6 +300,7 @@ export function groupFromDocument(document: unknown): ParsedGroup {
     ledgers: Object.freeze(ledgers),
     intercompany: Object.freeze(intercompany),
     acquisitions: Object.freeze(acquisitions),
+    disposals: Object.freeze(disposalInputs),
     asAt,
     period,
     averageMethod: (method ?? null) as AverageMethod | null,

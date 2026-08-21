@@ -10,7 +10,7 @@
  * them; that the other 40% of the equity belongs to outside shareholders is
  * settled later, as a claim, and not by adding up less of the balance sheet.
  *
- * Two things are worth being careful about.
+ * Three things are worth being careful about.
  *
  * The first is that each entity's translation carries its own adjustment — the
  * residual of translating assets at one rate, income at another and equity at
@@ -18,7 +18,14 @@
  * well as in total, because the group's translation reserve is the sum of the
  * subsidiaries' and a reader is entitled to see which subsidiary moved it.
  *
- * The second is that the same account code can mean different things in books
+ * The second is that not every entity's trial balance is read on the same day.
+ * A company the group sold in September has a balance sheet the group must
+ * account for and it is September's, not December's; asking its books what
+ * they say in December would be asking about somebody else's company. So each
+ * entity carries the date it was read at, and for every company still in the
+ * group that date is the reporting date.
+ *
+ * The third is that the same account code can mean different things in books
  * that were never kept on one chart. Nothing here can fix that, but it can say
  * so: where two entities give a code different names, the disagreement is
  * reported rather than resolved by whichever entity happened to be first.
@@ -70,6 +77,11 @@ export interface EntityContribution {
    * before the group controlled the company. Nil for an entity held all period.
    */
   readonly preAcquisitionResult: Money;
+  /**
+   * The date this entity's own books were read at. The reporting date for a
+   * company still in the group; the date control was lost for one that is not.
+   */
+  readonly readAt: CalendarDate;
 }
 
 export interface NameConflict {
@@ -166,10 +178,24 @@ export function aggregate(
   // group's for all of it.
   const reportingPeriod = options.period ?? { from: asAt, to: asAt };
 
+  const gone: { entity: string; reason: string }[] = [];
+
   for (const entity of consolidated) {
     const original = ledgerFor(ledgers, entity.code) as Ledger;
     const control = controlWindow(entity, reportingPeriod);
-    if (control.window === null && !control.acquiredDuring) {
+    if (!control.inPeriod) {
+      // Two ways to be outside the period and they are not the same kind of
+      // thing. A company bought after the reporting date is a date that
+      // contradicts the one being consolidated at, and one of the two is
+      // wrong. A company sold before the period opened is neither wrong nor
+      // surprising: it simply was not the group's, in the same way an
+      // associate is not consolidated. Treating it as an error would make a
+      // comparative column spanning the sale impossible to produce, when that
+      // column is exactly where the reader would look for it.
+      if (control.disposed !== null) {
+        gone.push({ entity: entity.code, reason: control.reason });
+        continue;
+      }
       throw new GroupError(
         `${entity.code} was ${control.reason}, so it cannot be consolidated as at ` +
           `${asAt}. Either the acquisition date or the reporting date is wrong.`,
@@ -209,12 +235,20 @@ export function aggregate(
       }
     }
 
+    // A company that has gone is read on the day it went. Its closing rate is
+    // that day's, because that is the day its net assets were handed over, and
+    // its average is taken over the window rather than the period: the months
+    // after the sale are not the group's, and neither are their rates.
+    const readAt = control.consolidateAt;
+    const averageOver =
+      control.disposedDuring && control.window !== null ? control.window : options.period;
+
     const translation = translate(ledger, {
       presentation,
       functional: entity.currency,
       rates: options.rates,
-      asAt: options.asAt,
-      ...(options.period === undefined ? {} : { period: options.period }),
+      asAt: String(readAt),
+      ...(averageOver === undefined ? {} : { period: averageOver }),
       ...(options.averageMethod === undefined ? {} : { averageMethod: options.averageMethod }),
       ...(options.equityBasis === undefined ? {} : { equityBasis: options.equityBasis }),
       ...(options.historicalAccounts === undefined
@@ -233,6 +267,7 @@ export function aggregate(
         control,
         windowApplied,
         preAcquisitionResult,
+        readAt,
       }),
     );
 
@@ -302,17 +337,20 @@ export function aggregate(
     translationAdjustment.isNegative ? translationAdjustment.negated() : Money.zero(presentation),
   );
 
-  const excluded = group
-    .list()
-    .filter((e) => !e.controlled)
-    .map((e) =>
-      Object.freeze({
-        entity: e.code,
-        reason: e.controlAsserted
-          ? "control is denied by the group's own definition"
-          : `held ${e.effective.toPercentString(4)} and not controlled`,
-      }),
-    );
+  const excluded = [
+    ...group
+      .list()
+      .filter((e) => !e.controlled)
+      .map((e) =>
+        Object.freeze({
+          entity: e.code,
+          reason: e.controlAsserted
+            ? "control is denied by the group's own definition"
+            : `held ${e.effective.toPercentString(4)} and not controlled`,
+        }),
+      ),
+    ...gone.map((e) => Object.freeze(e)),
+  ];
 
   const period =
     options.period ?? contributions[0]?.translation.period ?? { from: asAt, to: asAt };

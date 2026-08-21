@@ -59,6 +59,7 @@ import { GroupDocumentError, groupFromJson } from "../group/document.js";
 import { renderAggregation } from "../group/aggregate.js";
 import { renderEliminations } from "../group/intercompany.js";
 import { renderAcquisition } from "../group/acquisition.js";
+import { renderDisposal } from "../group/disposal.js";
 import { consolidate, renderConsolidation } from "../group/consolidate.js";
 import type { ConsolidationOptions } from "../group/consolidate.js";
 import { compareConsolidations, renderComparative } from "../group/comparative.js";
@@ -1653,6 +1654,7 @@ function consolidateCommand(environment: CliEnvironment, argv: readonly string[]
     ...(group.equityBasis === null ? {} : { equityBasis: group.equityBasis }),
     intercompany: group.intercompany,
     acquisitions: group.acquisitions,
+    disposals: group.disposals,
   });
 
   // The comparative period defaults to one of the same length ending on the
@@ -1730,6 +1732,8 @@ function consolidateCommand(environment: CliEnvironment, argv: readonly string[]
             to: contribution.control.window?.to ?? null,
             whole: contribution.control.whole,
             acquiredDuring: contribution.control.acquiredDuring,
+            disposedDuring: contribution.control.disposedDuring,
+            readAt: contribution.readAt,
             applied: contribution.windowApplied,
             preAcquisitionResult: contribution.preAcquisitionResult.toDecimalString(),
             reason: contribution.control.reason,
@@ -1748,6 +1752,18 @@ function consolidateCommand(environment: CliEnvironment, argv: readonly string[]
             nciClosing: working.nciClosing.toDecimalString(),
             postAcquisitionReserves: working.postAcquisitionReserves.toDecimalString(),
           })),
+          disposals: result.disposals.map((working) => ({
+            entity: working.entity,
+            disposed: working.disposal.disposed,
+            proceeds: working.disposal.proceeds.toDecimalString(),
+            netAssetsRemoved: working.netAssetsRemoved.toDecimalString(),
+            nciRemoved: working.nciRemoved.toDecimalString(),
+            goodwillRemoved: working.goodwillRemoved.toDecimalString(),
+            carryingAmount: working.disposal.carryingAmount.toDecimalString(),
+            result: working.result.toDecimalString(),
+            resultToDisposal: working.resultToDisposal.toDecimalString(),
+            holderResult: working.disposal.holderResult.toDecimalString(),
+          })),
           intercompany: {
             pairs: result.eliminations.pairs.length,
             eliminated: result.eliminations.totalEliminated.toDecimalString(),
@@ -1762,6 +1778,8 @@ function consolidateCommand(environment: CliEnvironment, argv: readonly string[]
           nonControllingInterest: result.nonControllingInterest.toDecimalString(),
           translationReserve: result.translationReserve.toDecimalString(),
           investmentResidual: result.investmentResidual.toDecimalString(),
+          disposalResult: result.disposalResult.toDecimalString(),
+          disposalResidual: result.disposalResidual.toDecimalString(),
           residual: result.residual.toDecimalString(),
           balanced: result.balanced,
           ...(compared === undefined
@@ -1815,7 +1833,9 @@ function consolidateCommand(environment: CliEnvironment, argv: readonly string[]
   // Printed whenever any entity was not the group's for the whole period,
   // whatever --show says: a consolidation covering nine months of one company
   // and twelve of another should never be read without knowing that.
-  const partial = result.aggregation.entities.some((c) => c.control.acquiredDuring);
+  const partial = result.aggregation.entities.some(
+    (c) => c.control.acquiredDuring || c.control.disposedDuring,
+  );
   if (wants("windows") || partial) {
     sections.push(
       renderControlWindows(
@@ -1836,6 +1856,10 @@ function consolidateCommand(environment: CliEnvironment, argv: readonly string[]
   if (wants("workings")) {
     for (const working of result.workings) {
       sections.push(renderAcquisition(working.acquisition));
+      sections.push("");
+    }
+    for (const working of result.disposals) {
+      sections.push(renderDisposal(working.disposal));
       sections.push("");
     }
   }
