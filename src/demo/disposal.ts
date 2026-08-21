@@ -118,8 +118,17 @@ export function disposalStructure(): GroupStructure {
  * cash is in, and the difference between the two — 200,000 — sits in its
  * income statement as a gain measured against what the shares cost. The
  * consolidation reverses exactly that figure and puts the group's in its place.
+ *
+ * The price is a parameter because the two have to agree. The proceeds the
+ * consolidation is told about and the proceeds the holder's books recorded are
+ * the same event, and a consolidation given one figure while the books say
+ * another would reverse the wrong gain and leave the difference sitting in the
+ * disposal account looking like a result.
  */
-export function harrowgateLedger(): Ledger {
+export function harrowgateLedger(proceeds = "600000.00"): Ledger {
+  const cost = Money.parse("400000.00", GBP);
+  const received = Money.parse(proceeds, GBP);
+  const result = received.minus(cost);
   return ledgerOf([
     { id: "HH-01", date: "2024-06-30", narration: "Share capital subscribed", debit: "1110", credit: "3100", amount: "1000000.00" },
     { id: "HH-02", date: "2024-12-31", narration: "Acquired 80% of Pellew Marine", debit: "1230", credit: "1110", amount: "400000.00" },
@@ -127,8 +136,14 @@ export function harrowgateLedger(): Ledger {
     { id: "HH-04", date: "2025-06-30", narration: "Consulting fees", debit: "1110", credit: "4200", amount: "150000.00" },
     { id: "HH-05", date: "2026-06-30", narration: "Consulting fees", debit: "1110", credit: "4200", amount: "240000.00" },
     { id: "HH-06", date: "2026-06-30", narration: "Salaries", debit: "5200", credit: "1110", amount: "160000.00" },
-    { id: "HH-07", date: "2026-09-30", narration: "Sold Pellew Marine — proceeds", debit: "1110", credit: "1230", amount: "400000.00" },
-    { id: "HH-08", date: "2026-09-30", narration: "Sold Pellew Marine — gain on the shares", debit: "1110", credit: "4970", amount: "200000.00" },
+    { id: "HH-07", date: "2026-09-30", narration: "Sold Pellew Marine — the shares come off", debit: "1110", credit: "1230", amount: cost.toDecimalString() },
+    ...(result.isZero
+      ? []
+      : [
+          result.isPositive
+            ? { id: "HH-08", date: "2026-09-30", narration: "Sold Pellew Marine — gain on the shares", debit: "1110", credit: "4970", amount: result.toDecimalString() }
+            : { id: "HH-08", date: "2026-09-30", narration: "Sold Pellew Marine — loss on the shares", debit: "5970", credit: "1110", amount: result.negated().toDecimalString() },
+        ]),
   ]);
 }
 
@@ -157,8 +172,8 @@ export function pellewLedger(): Ledger {
   ]);
 }
 
-export function disposalLedgers(): Record<string, Ledger> {
-  return { HH: harrowgateLedger(), PM: pellewLedger() };
+export function disposalLedgers(proceeds = "600000.00"): Record<string, Ledger> {
+  return { HH: harrowgateLedger(proceeds), PM: pellewLedger() };
 }
 
 export function disposalAcquisitions(): readonly AcquisitionInput[] {
