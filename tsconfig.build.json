@@ -1,0 +1,17 @@
+{
+  // The published build. The base config exists for the editor and the type
+  // check, so it has `rootDir: "."` and includes `tests/**` -- which makes
+  // `tsc -p tsconfig.json` emit `dist/src/` and `dist/tests/`, and puts the
+  // compiled test suite inside anything packed from `dist`.
+  //
+  // `src/demo` stays in: `src/cli/run.ts` imports the generator from it, so
+  // the `generate` subcommand does not work without it.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "dist",
+    "sourceMap": false
+  },
+  "include": ["src/**/*.ts"],
+  "exclude": ["node_modules", "dist", "tests"]
+}
