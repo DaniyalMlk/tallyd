@@ -4,8 +4,50 @@
   "description": "Double-entry ledger and bank-reconciliation engine",
   "type": "module",
   "license": "MIT",
+  "author": "Daniyal",
+  "keywords": [
+    "accounting",
+    "double-entry",
+    "ledger",
+    "bookkeeping",
+    "reconciliation",
+    "bank-statement",
+    "trial-balance",
+    "typescript"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/DaniyalMlk/tallyd.git"
+  },
+  "bugs": {
+    "url": "https://github.com/DaniyalMlk/tallyd/issues"
+  },
+  "homepage": "https://github.com/DaniyalMlk/tallyd#readme",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "bin": {
+    "tallyd": "dist/cli/main.js"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=20.19.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "tsc -p tsconfig.build.json",
+    "prepack": "npm run build",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
@@ -27,8 +69,5 @@
     "fast-check": "^3.23.2",
     "typescript": "^5.7.2",
     "vitest": "^2.1.8"
-  },
-  "bin": {
-    "tallyd": "dist/src/cli/main.js"
   }
 }

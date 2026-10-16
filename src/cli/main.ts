@@ -1,3 +1,4 @@
+#!/usr/bin/env node
 /**
  * The executable. Everything interesting is in `run`, which is a pure
  * function; this file exists to connect it to the process.

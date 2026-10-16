@@ -148,6 +148,18 @@ all disagree slightly.
       rather than at what it cost — which overstates both inventory and the
       reserves that put it there, and does so by an amount nobody can see.
 
+- [x] **16 — Installable, and tested somewhere other than a laptop.**
+      A build configuration that emits `dist/index.js` and `dist/cli/main.js`
+      and nothing from `tests/`; entry points, file list, repository, engines
+      and a licence file in place; a shebang on the executable, without which
+      an installed `tallyd` is handed to the shell. Tests over what `npm pack`
+      would actually ship, which is the one thing a suite run from the source
+      tree cannot see. Continuous integration across the Node range `engines`
+      claims, with the tarball installed into a bare project and used from
+      there. A tag-driven release that refuses a tag disagreeing with the
+      manifest and holds `id-token: write` and nothing else, so no credential
+      is stored anywhere.
+
 ## Current state
 
 | Module | What it does |

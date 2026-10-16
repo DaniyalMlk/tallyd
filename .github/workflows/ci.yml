@@ -1,0 +1,70 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Tests on Node ${{ matrix.node-version }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # The floor is the one `engines` claims, so the claim is tested rather
+        # than asserted. The top is current.
+        node-version: ["20.19.0", "22.x", "24.x"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: npm
+      - name: Install
+        run: npm ci
+      - name: Type check
+        run: npm run typecheck
+      - name: Test
+        run: npm test
+
+  package:
+    name: The tarball installs and runs
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.x
+          cache: npm
+      - name: Install
+        run: npm ci
+      - name: Pack
+        run: npm pack
+      # The packaging tests assert what the tarball contains. This asserts
+      # that installing it works, which is a different question: it exercises
+      # module resolution through `exports` and the bin shim, neither of which
+      # exists inside the repository.
+      - name: Install the tarball into a bare project and use it
+        run: |
+          mkdir -p /tmp/consumer && cd /tmp/consumer
+          npm init -y > /dev/null
+          npm install "$GITHUB_WORKSPACE"/tallyd-*.tgz
+          node --input-type=module -e "
+            import * as tallyd from 'tallyd';
+            const names = Object.keys(tallyd);
+            if (names.length < 100) {
+              throw new Error('the package exports ' + names.length + ' names');
+            }
+            console.log('imported ' + names.length + ' exports');
+          "
+          ./node_modules/.bin/tallyd --help > /dev/null
+          mkdir -p /tmp/book
+          ./node_modules/.bin/tallyd generate --out /tmp/book > /dev/null
+          ./node_modules/.bin/tallyd report --ledger /tmp/book/books.json > /dev/null
+          ./node_modules/.bin/tallyd reconcile --ledger /tmp/book/books.json \
+            --statement /tmp/book/statement.csv --account 1110 > /dev/null
+          echo "the installed package imports, generates, reports and reconciles"

@@ -52,11 +52,30 @@ September contributes eight months of results and no balance sheet at all. Both
 are handled, and the second is measured against what the group was carrying the
 company at rather than against what the shares cost.
 
-## Running it
+## Installing it
+
+```bash
+npm install tallyd
+```
+
+```ts
+import { Money, Ledger, reconcile } from "tallyd";
+```
+
+The command line comes with it:
+
+```bash
+npx tallyd --help
+```
+
+Node 20.19 or newer. The package ships compiled JavaScript and type
+declarations and has no runtime dependencies.
+
+## Running it from source
 
 ```bash
 npm install
-npm test              # 1,611 tests
+npm test              # 1,920 tests
 npm run typecheck
 npm run demo          # a worked month, posted and reported
 npm run demo:ingest   # the same month as the bank recorded it
@@ -1210,6 +1229,21 @@ the single-file promise. The cash position line places points by calendar date
 rather than by index — spacing ten movements evenly across a month draws a
 three-day gap and a thirteen-day gap the same width, which is a lie about the one
 axis the chart exists to show.
+
+## Releasing
+
+A release is a tag. `v0.1.0` publishes `0.1.0` and nothing else publishes
+anything: the workflow refuses a tag that disagrees with `package.json`, runs
+the suite and the type check, then installs the packed tarball into a bare
+project and uses it from there before anything reaches the registry.
+
+The publish job holds one permission, `id-token: write`. There is no npm token
+in this repository, in its secrets, or in any log: npm trusted publishing
+exchanges a short-lived OIDC token for the right to publish this package from
+this repository, and attaches build provenance automatically. That also means
+the trusted publisher has to be registered on npm for the package before the
+first tag is pushed — the registry does not validate the arrangement until a
+publish is attempted.
 
 ## Licence
 
