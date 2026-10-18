@@ -280,11 +280,11 @@ export function exactArithmetic(): ExactArithmetic {
   const group = consolidatedGroup();
 
   return {
-    entries: generated.ledger.entries.length,
+    entries: generated.ledger.size,
     trialBalanceDebit: balance.totalDebit.toString(),
     trialBalanceCredit: balance.totalCredit.toString(),
     trialBalanceDifference: balance.difference.toString(),
-    groupEntries: group.ledger.entries.length,
+    groupEntries: group.ledger.size,
     groupDifference: group.trialBalance.difference.toString(),
     translationAdjustment: group.aggregation.translationAdjustment.toString(),
     translationReserve: group.translationReserve.toString(),
