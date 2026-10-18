@@ -8,49 +8,92 @@ processor's fee, the dates are off by two days of settlement lag, the descriptio
 `SQ *COFFEE 4471` and your ledger says `Client lunch — Acme`, and one deposit covers
 three invoices. That matching problem is what this project is actually about.
 
-## Status
+## What is checked, and against what
 
-Phases 1–14 are done; see [`ROADMAP.md`](./ROADMAP.md). The accounting core is
-complete and tested — money, the chart of accounts, journal entries, the ledger
-and the trial balance — and so is statement ingestion: CSV and OFX readers,
-format detection and duplicate flagging. The matching engine works end to end,
-including one-to-many and many-to-one matches, and produces a bank
-reconciliation statement that balances to the penny. On top of that sit the
-financial statements — income statement, balance sheet and ageing — a CLI that
-runs the whole thing against files on disk, and a dashboard that turns the
-review queue into something you can actually work through.
+A reconciliation engine is easy to describe and hard to believe. Every one of
+them matches a bank statement against a set of books; the question is how often
+it is right, how often it is *wrong*, and what happens to the lines it cannot
+explain. So here is what was measured rather than what it does. Every figure is
+produced by `npm run demo:evidence`, which runs in CI and exits non-zero if any
+of them moves:
 
-Two pieces of recent work are worth calling out. A seeded generator that builds
-books of any size *with the answer key*, and the performance pass measured
-against it: a year of a busy account — 715 ledger movements against 625
-statement lines — went from 16.8 seconds to 0.2 with identical accuracy either
-side. And a matcher that no longer forgets: a counterparty a reviewer confirms
-once is recognised the next month, which on generated books moved recall from
-75.6% to 89.0% and cut the review queue by 69%.
+| Check | Result |
+| --- | --- |
+| The matcher against generated books with an answer key, 20 periods | 1,786 links, 0 wrong matches, precision 1.000 in every period |
+| The worst of those periods, unattended and then with the review queue | recall 64.8%, 94.9% with suggestions |
+| Candidate pairs the amount-and-date index lets through to scoring | 269 of 90,144 (335x), 1,172 of 1,760,979 (1503x) at 1,419 movements |
+| A counterparty confirmed once, in the next period's unrelated books | recall 75.6% to 89.0%, queue 16 to 5 (68.8% shorter), precision still 1.000 |
+| Trial balance over 625 generated journal entries | 640042.62 GBP against 640042.62 GBP, difference 0.00 GBP |
+| A three-company, three-currency consolidation | 9 balanced entries, translation reserve -22164.01 GBP against an adjustment of 22164.01 GBP, residual 0.00 GBP |
 
-The cycle now closes at both ends. Decisions leave the review UI as a file the
-CLI already reads, and the statement lines nothing in the books explains come
-back as journal entries — classified, balanced, and impossible to post twice.
+Three of those rows are worth a second look.
 
-The engine also holds more than one currency now. Rates are exact rationals with
-dated lookup that inverts and triangulates; balances denominated in another
-currency are retranslated at the close, per open item so that settling one
-invoice out of several cannot count a rate movement twice; and the statements can
-be presented in a currency the books are not kept in, with the translation
-adjustment as a line rather than a plug.
+**The matcher is scored, not described.** The generator in
+`src/demo/generator.ts` builds books of any size *with the answer key*, so
+`measureAccuracy` can compare what the matcher decided against what was
+actually true. Twenty unrelated periods produced 1,786 pairings to find and not
+one wrong match — and the row quotes the *worst* of the twenty rather than the
+mean, because a mean hides the period a reader cares about. Recall of 64.8%
+unattended is the deliberate half of that: a match below the accept threshold
+goes to a review queue rather than through, and counting the queue the figure
+is 94.9%. A wrong auto-accepted match is worse than a queued one, because it
+consumes the evidence and strands the two lines it should have paired.
 
-Most recently it consolidates. A group is several sets of books with several
-currencies, holdings that run through one company to reach another, balances
-that have to eliminate against each other, and shareholders outside the group
-with a claim on companies inside it. All of that comes out as a real ledger in
-the presentation currency, one balanced journal entry per step, so every
-consolidated figure can be traced back to what put it there.
+**The speed figure is a count, not a duration.** Milliseconds are a statement
+about the machine they were measured on. The number of candidate pairs the
+amount-and-date index lets through to text comparison is a property of the
+algorithm and is the same everywhere: at a year of a busy account — 1,419
+ledger movements against 1,241 statement lines — 1,172 pairs are scored out of
+the 1,760,979 a matcher comparing everything to everything would look at.
 
-The group can also change shape during the period. A company bought in April
-contributes nine months of results and a full balance sheet; one sold in
-September contributes eight months of results and no balance sheet at all. Both
-are handled, and the second is measured against what the group was carrying the
-company at rather than against what the shares cost.
+**Zero means zero.** Amounts are integer minor units, so a trial balance either
+balances or it does not; there is no tolerance to pick. The consolidation row is
+there because three companies kept in three currencies have to be translated at
+different rates and the difference has to land somewhere — and it lands in the
+translation reserve, which comes back as the translation adjustment with its
+sign flipped rather than as whatever made the page add up.
+
+```bash
+npm run demo:evidence     # all six, non-zero if a figure moves
+```
+
+Behind them: 1,920 tests on Node 20.19, 22 and 24, including property-based
+sweeps over the ledger and the money type — 2,000 random entries cannot
+unbalance the ledger, and `split(n)` conserves every minor unit across 20,000
+random allocations.
+
+## What is built
+
+All phases in [`ROADMAP.md`](./ROADMAP.md) are done. The accounting core —
+money, the chart of accounts, journal entries, the ledger, the trial balance —
+and statement ingestion, with CSV and OFX readers, format detection and
+duplicate flagging. The matching engine end to end, including one-to-many and
+many-to-one matches, producing a bank reconciliation that balances to the
+penny. On top: the financial statements, a CLI that runs the whole thing against
+files on disk, and a dashboard that turns the review queue into something you
+can work through.
+
+The cycle closes at both ends. Decisions leave the review UI as a file the CLI
+already reads, and the statement lines nothing in the books explains come back
+as journal entries — classified, balanced, and impossible to post twice.
+
+It holds more than one currency. Rates are exact rationals with dated lookup
+that inverts and triangulates; balances in another currency are retranslated at
+the close, per open item so that settling one invoice out of several cannot
+count a rate movement twice; and the statements can be presented in a currency
+the books are not kept in, with the translation adjustment as a line rather than
+a plug.
+
+And it consolidates. A group is several sets of books in several currencies,
+holdings that run through one company to reach another, balances that eliminate
+against each other, and shareholders outside the group with a claim on companies
+inside it. All of it comes out as a real ledger in the presentation currency,
+one balanced journal entry per step, so every consolidated figure traces back to
+what put it there. The group can change shape during the period, too: a company
+bought in April contributes nine months of results and a full balance sheet, one
+sold in September contributes eight months and no balance sheet at all, and the
+second is measured against what the group was carrying it at rather than against
+what the shares cost.
 
 ## Installing it
 
@@ -85,6 +128,7 @@ npm run demo:foreign  # a quarter with a euro customer and a dollar supplier
 npm run demo:group    # three companies in three currencies, consolidated
 npm run demo:periods  # that group two years running, and what moved between
 npm run demo:midyear  # a company bought in April, consolidated both ways
+npm run demo:evidence # the front page's figures, recomputed
 npm run bench         # the matcher timed and scored over generated books
 ```
 
