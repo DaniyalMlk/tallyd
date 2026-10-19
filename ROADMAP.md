@@ -141,12 +141,27 @@ all disagree slightly.
       left before the period opened is not consolidated at all, which is a fact
       about a period rather than an error.
 
-- [ ] **15 — What the group sells itself.** Unrealised profit on goods one group
+- [x] **15 — What the group sells itself.** Unrealised profit on goods one group
       company has sold to another and which are still in stock. The trading is
       already taken out and the margin sitting inside the buyer's inventory is
       not, so consolidated stock is carried at what the group charged itself
       rather than at what it cost — which overstates both inventory and the
       reserves that put it there, and does so by an amount nobody can see.
+      Three bases, because the rate is quoted two incompatible ways in practice
+      and the same figure means different money under each: a markup on cost, a
+      margin on the selling price, and the goods' own cost, which converts
+      nothing and is what the other two are checked against. The rate is a
+      rational, so a third of a price stays a third rather than going 3.33 out
+      on 100,000. The charge follows the seller and not the stock, since a
+      provision reverses a profit and the profit belongs to whoever recorded
+      it — so a subsidiary that sold up to its parent has its outside stake bear
+      a share and a subsidiary that only bought does not, with the write-down
+      against inventory identical either way. A company held through another
+      takes the complement of the chained interest. A provision larger than the
+      account it is written against is named rather than posted, decided on the
+      consignments in that account together, because any one of them alone can
+      look affordable. Declarable in a group document, where the basis is
+      required and has no default.
 
 - [x] **16 — Installable, and tested somewhere other than a laptop.**
       A build configuration that emits `dist/index.js` and `dist/cli/main.js`
@@ -228,6 +243,7 @@ all disagree slightly.
 | `src/group/accounts.ts` | The accounts that exist only when there is more than one company |
 | `src/group/aggregate.ts` | Every controlled entity translated and added, in full |
 | `src/group/intercompany.ts` | Declared balances paired, eliminated, and the residual named |
+| `src/group/unrealised.ts` | The margin on stock the group sold itself, and who gives it up |
 | `src/group/acquisition.ts` | Goodwill, the outside stake, and a bargain purchase |
 | `src/group/consolidate.ts` | The consolidation, assembled into a ledger |
 | `src/group/document.ts` | The group document, validated on the way in |

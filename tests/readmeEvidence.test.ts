@@ -37,6 +37,8 @@ const QUOTED = [
   "recall 75.6% to 89.0%, queue 16 to 5 (68.8% shorter), precision still 1.000",
   "640042.62 GBP against 640042.62 GBP, difference 0.00 GBP",
   "9 balanced entries, translation reserve -22164.01 GBP against an adjustment of 22164.01 GBP, residual 0.00 GBP",
+  "20000.00 and 25000.00 on the same 100000.00 of stock, the second carrying goods that cost 80000.00 at 75000.00",
+  "stock down 20000.00 either way; the outside quarter bears 5000.00 when its company sold and 0.00 when it only bought",
 ] as const;
 
 /**
@@ -51,6 +53,8 @@ const ROWS = [
   "A counterparty confirmed once, in the next period's unrelated books",
   "Trial balance over 625 generated journal entries",
   "A three-company, three-currency consolidation",
+  "The same quarter read as a markup on cost and as a margin on price",
+  "One consignment of intragroup stock, sent up to the parent and then down to the subsidiary",
 ] as const;
 
 describe("the front page's figures", () => {
