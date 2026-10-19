@@ -169,20 +169,27 @@ function aggregationFor(ledgers: Record<string, Ledger>, group = GROUP) {
 }
 
 /** The declaration for the fixture above, as either basis. */
-function declare(
-  seller: string,
-  holder: string,
-  overrides: Partial<IntragroupStockDeclaration> = {},
-): IntragroupStockDeclaration {
-  return {
+type Overrides = {
+  [K in keyof IntragroupStockDeclaration]?: IntragroupStockDeclaration[K] | undefined;
+};
+
+function declare(seller: string, holder: string, overrides: Overrides = {}): IntragroupStockDeclaration {
+  const base: IntragroupStockDeclaration = {
     seller,
     holder,
     account: STOCK,
     onHand: gbp("100000.00"),
     basis: "markup-on-cost",
     rate: Interest.of(1n, 4n),
-    ...overrides,
   };
+  // Assigning `rate: undefined` is not the same as leaving `rate` out under
+  // exactOptionalPropertyTypes, and the cost basis needs it genuinely absent.
+  for (const [k, v] of Object.entries(overrides)) {
+    const mutable = base as unknown as Record<string, unknown>;
+    if (v === undefined) delete mutable[k];
+    else mutable[k] = v;
+  }
+  return base;
 }
 
 describe("the rate is quoted two ways and they are not the same rate", () => {
@@ -442,7 +449,7 @@ describe("what cannot be provided against is named", () => {
   it("rejects declarations that cannot mean anything", () => {
     const { P, S } = books(true);
     const aggregation = aggregationFor({ P, S });
-    const attempt = (overrides: Partial<IntragroupStockDeclaration>): (() => unknown) => () =>
+    const attempt = (overrides: Overrides): (() => unknown) => () =>
       provideForUnrealisedProfit(GROUP, aggregation, [declare("S", "P", overrides)]);
 
     expect(attempt({ seller: "P", holder: "P" })).toThrow(/cannot sell stock to itself/);
@@ -552,9 +559,8 @@ describe("through a consolidation", () => {
         rates: RATES,
         asAt: ASAT,
         period: PERIOD,
-        historicalAccounts: ["1230"],
         acquisitions: [
-          { entity: "S", acquired: "2026-01-01", consideration: gbp("90000.00"), holder: "P" },
+          { entity: "S", acquired: "2026-01-01", consideration: gbp("90000.00") },
         ],
         intercompany: [
           { entity: seller, account: "1190", counterparty: buyer, link: "trading" },
@@ -618,7 +624,7 @@ describe("through a consolidation", () => {
     expect(entry?.tags).toContain("unrealised-profit");
     // In the consolidated ledger, tagged and findable rather than folded into
     // another step's entry.
-    expect(result.ledger.entries.filter((e) => e.tags.includes("unrealised-profit"))).toHaveLength(1);
+    expect(result.ledger.all().filter((e) => e.tags.includes("unrealised-profit"))).toHaveLength(1);
   });
 });
 
