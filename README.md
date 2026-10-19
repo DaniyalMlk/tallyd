@@ -25,6 +25,8 @@ of them moves:
 | A counterparty confirmed once, in the next period's unrelated books | recall 75.6% to 89.0%, queue 16 to 5 (68.8% shorter), precision still 1.000 |
 | Trial balance over 625 generated journal entries | 640042.62 GBP against 640042.62 GBP, difference 0.00 GBP |
 | A three-company, three-currency consolidation | 9 balanced entries, translation reserve -22164.01 GBP against an adjustment of 22164.01 GBP, residual 0.00 GBP |
+| The same quarter read as a markup on cost and as a margin on price | 20000.00 and 25000.00 on the same 100000.00 of stock, the second carrying goods that cost 80000.00 at 75000.00 |
+| One consignment of intragroup stock, sent up to the parent and then down to the subsidiary | stock down 20000.00 either way; the outside quarter bears 5000.00 when its company sold and 0.00 when it only bought |
 
 Three of those rows are worth a second look.
 
@@ -57,7 +59,7 @@ sign flipped rather than as whatever made the page add up.
 npm run demo:evidence     # all six, non-zero if a figure moves
 ```
 
-Behind them: 1,920 tests on Node 20.19, 22 and 24, including property-based
+Behind them: 1,984 tests on Node 20.19, 22 and 24, including property-based
 sweeps over the ledger and the money type — 2,000 random entries cannot
 unbalance the ledger, and `split(n)` conserves every minor unit across 20,000
 random allocations.
@@ -118,7 +120,7 @@ declarations and has no runtime dependencies.
 
 ```bash
 npm install
-npm test              # 1,920 tests
+npm test              # 1,984 tests
 npm run typecheck
 npm run demo          # a worked month, posted and reported
 npm run demo:ingest   # the same month as the bank recorded it
@@ -807,6 +809,72 @@ figures has a problem, and making the number disappear would be hiding it.
 
 A declaration with no mirror on the other side is reported and *not* eliminated.
 Removing one side on its own would unbalance the group.
+
+### What the group sells itself
+
+```
+Unrealised profit on intragroup stock — 1 consignment, 20000.00 GBP provided
+S into P 1160 Inventory                               100000.00 on hand
+  markup-on-cost, 20% of the price                     20000.00 provided
+  15000.00 the group's, 5000.00 the 25% outside S
+```
+
+Taking the trading out leaves the margin behind. A company that sold another
+100,000 of goods at cost plus a quarter earned 20,000 on the journey, and if the
+buyer still has the goods then consolidated stock is carried at what the group
+charged itself rather than at what the goods cost it. Nothing is wrong in either
+set of books, which is why this cannot be inferred from them: the seller sold at
+a profit, the buyer paid the price, and only somebody who knows the goods came
+from inside the group can say the profit is not yet real.
+
+Two parts of it are easy to get wrong.
+
+**The rate is quoted two incompatible ways.** "Cost plus a quarter" and "a
+quarter margin" are different trades: goods costing 80 sold at cost plus a
+quarter fetch 100 and carry 20 of profit, which is a *fifth* of the selling
+price. Taking a quarter of the price instead provides 25 against a margin that
+was only ever 20, and carries the goods at 75 against a cost to the group of 80
+— the same error again, in the other direction. Both conventions are named, and
+so is a third that states what the goods cost and needs no conversion at all.
+The rate is a rational rather than a decimal, so a third of a price stays a
+third: quoted to four places it is 3.33 out on 100,000 and ten times that on a
+million.
+
+**The charge follows the seller, not the stock.** A provision reverses a profit
+and the profit belongs to whoever recorded it. When a three-quarter-owned
+subsidiary sells up to its parent, the outside quarter gives up its share of a
+margin that was never earned. When the parent sells *down* into that same
+subsidiary, the outside stake bears none of it — however much of the stock the
+subsidiary is holding. The write-down against inventory is identical either way;
+only the attribution moves, which is the part that looks wrong until you ask
+whose profit is being taken away. A company held through another takes the
+complement of the chained interest: 80% of 75% is 60% owned, so 40% is outside,
+not the 20% or the 25% that either holding alone suggests.
+
+A provision larger than the account it is written against is reported and not
+posted. Writing stock below nothing is not a smaller error than carrying it
+above cost, and consignments sitting in the same account are added up before
+that is decided, since any one of them alone can look affordable.
+
+In a group document:
+
+```json
+"intragroupStock": [
+  {
+    "seller": "S",
+    "holder": "P",
+    "account": "1160",
+    "onHand": { "amount": "100000.00", "currency": "GBP" },
+    "basis": "markup-on-cost",
+    "rate": "25%"
+  }
+]
+```
+
+`basis` is required and has no default. `markup-on-cost`, `margin-on-price` and
+`cost` are the three; `rate` takes a percentage or a ratio (`"1/3"`), and `cost`
+replaces it on the third. There is no safe convention to assume, and a file that
+left it out would be wrong by a quarter of the provision while looking complete.
 
 ### What was paid, and for what
 

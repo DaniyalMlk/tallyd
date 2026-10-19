@@ -22,6 +22,8 @@ import { type EntityDefinition, GroupStructure } from "./structure.js";
 import type { AcquisitionInput, NciMeasurement } from "./acquisition.js";
 import type { DisposalInput } from "./disposal.js";
 import type { IntercompanyDeclaration } from "./intercompany.js";
+import type { IntragroupStockDeclaration } from "./unrealised.js";
+import { Interest } from "./interest.js";
 
 export class GroupDocumentError extends Error {
   constructor(message: string) {
@@ -35,6 +37,8 @@ export interface ParsedGroup {
   /** Where each entity's books live, by entity code. */
   readonly ledgers: ReadonlyMap<string, string>;
   readonly intercompany: readonly IntercompanyDeclaration[];
+  /** Goods one group company sold another and the buyer has not sold on. */
+  readonly intragroupStock: readonly IntragroupStockDeclaration[];
   readonly acquisitions: readonly AcquisitionInput[];
   readonly disposals: readonly DisposalInput[];
   readonly asAt: string | null;
@@ -176,6 +180,53 @@ export function groupFromDocument(document: unknown): ParsedGroup {
     throw new GroupDocumentError("intercompany must be a list of declarations");
   }
 
+  // Goods one company sold another and the buyer still has. The basis is
+  // required and has no default on purpose: "25%" is a fifth of the price
+  // under one convention and a quarter of it under the other, so a document
+  // that left the convention to be guessed would be out by a quarter of the
+  // provision without saying anything.
+  const stockRaw = document["intragroupStock"];
+  const intragroupStock: IntragroupStockDeclaration[] = [];
+  if (Array.isArray(stockRaw)) {
+    stockRaw.forEach((value, index) => {
+      if (!isObject(value)) {
+        throw new GroupDocumentError(`Intragroup stock declaration ${index} is not an object`);
+      }
+      const what = `Intragroup stock declaration ${index}`;
+      const basis = requireString(value["basis"], `${what}'s basis`);
+      if (basis !== "markup-on-cost" && basis !== "margin-on-price" && basis !== "cost") {
+        throw new GroupDocumentError(
+          `${what}'s basis must be markup-on-cost, margin-on-price or cost, not "${basis}"`,
+        );
+      }
+      const declaration: IntragroupStockDeclaration = {
+        seller: requireString(value["seller"], `${what}'s seller`),
+        holder: requireString(value["holder"], `${what}'s holder`),
+        account: requireString(value["account"], `${what}'s account`),
+        onHand: requireMoney(value["onHand"], `${what}'s stock on hand`),
+        basis,
+      };
+      const rateText = optionalString(value["rate"], `${what}'s rate`);
+      if (rateText !== undefined) {
+        try {
+          declaration.rate = Interest.parse(rateText);
+        } catch (error) {
+          throw new GroupDocumentError(
+            `${what}'s rate "${rateText}" is not a rate: ${(error as Error).message}`,
+          );
+        }
+      }
+      if (value["cost"] !== undefined && value["cost"] !== null) {
+        declaration.cost = requireMoney(value["cost"], `${what}'s cost`);
+      }
+      const note = optionalString(value["note"], `${what}'s note`);
+      if (note !== undefined) declaration.note = note;
+      intragroupStock.push(declaration);
+    });
+  } else if (stockRaw !== undefined && stockRaw !== null) {
+    throw new GroupDocumentError("intragroupStock must be a list of declarations");
+  }
+
   const acquisitionsRaw = document["acquisitions"];
   const acquisitions: AcquisitionInput[] = [];
   if (Array.isArray(acquisitionsRaw)) {
@@ -299,6 +350,7 @@ export function groupFromDocument(document: unknown): ParsedGroup {
     structure,
     ledgers: Object.freeze(ledgers),
     intercompany: Object.freeze(intercompany),
+    intragroupStock: Object.freeze(intragroupStock),
     acquisitions: Object.freeze(acquisitions),
     disposals: Object.freeze(disposalInputs),
     asAt,

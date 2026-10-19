@@ -22,6 +22,15 @@
  * expenses, the same way a bargain purchase is a gain and not negative
  * goodwill.
  *
+ * Unrealised profit on intragroup stock is a group line for a subtler reason:
+ * nothing is wrong in either company's books. The seller earned its margin and
+ * recorded it; the buyer paid the price and carries the goods at it. It is only
+ * on one page together that the two become a company having sold something to
+ * itself at a profit, and the margin has to come back out of the stock it is
+ * sitting inside. Charged to its own expense rather than folded into cost of
+ * sales, because a reader who wants to know what the group's third-party gross
+ * margin was should not have to take this out again by hand.
+ *
  * The intercompany accounts themselves are different in kind: those belong in
  * the entities' own books, and they are here so the standard chart has them to
  * post to. A group that lends between its companies needs somewhere to record
@@ -49,6 +58,7 @@ export const GROUP_ACCOUNTS = {
   nciProfitShare: "3410",
   disposalGain: "4970",
   disposalLoss: "5970",
+  unrealisedProfit: "5965",
 } as const;
 
 export const CONSOLIDATION_ACCOUNTS: readonly AccountDefinition[] = [
@@ -112,6 +122,13 @@ export const CONSOLIDATION_ACCOUNTS: readonly AccountDefinition[] = [
     name: "Intercompany Purchases",
     type: "expense",
     parent: "5000",
+  },
+  {
+    code: GROUP_ACCOUNTS.unrealisedProfit,
+    name: "Unrealised Profit on Intragroup Stock",
+    type: "expense",
+    parent: "5000",
+    description: "Margin the group charged itself on goods still in its own stock",
   },
   {
     code: GROUP_ACCOUNTS.nciProfitShare,

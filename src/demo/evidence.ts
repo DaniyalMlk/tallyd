@@ -27,6 +27,12 @@
  */
 
 import { generateBooks } from "./generator.js";
+import {
+  checkUnrealised,
+  unrealisedEvidence,
+  unrealisedRows,
+  type UnrealisedEvidence,
+} from "./unrealisedEvidence.js";
 import { consolidatedGroup } from "./groupReport.js";
 import { bankView } from "../reconcile/bankView.js";
 import { reconcile, type Match } from "../reconcile/matcher.js";
@@ -298,6 +304,7 @@ export interface Evidence {
   readonly accuracy: AccuracySweep;
   readonly index: readonly IndexPoint[];
   readonly learning: LearningEffect;
+  readonly unrealised: UnrealisedEvidence;
   readonly exact: ExactArithmetic;
 }
 
@@ -372,6 +379,9 @@ export function evidence(): Evidence {
     );
   }
 
+  const unrealised = unrealisedEvidence();
+  checkUnrealised(unrealised);
+
   const exact = exactArithmetic();
   for (const [what, difference] of [
     ["the trial balance", exact.trialBalanceDifference],
@@ -384,7 +394,7 @@ export function evidence(): Evidence {
   }
   if (!exact.groupBalanced) throw new Error("the consolidation does not balance");
 
-  return { accuracy, index, learning, exact };
+  return { accuracy, index, learning, exact, unrealised };
 }
 
 /**
@@ -395,7 +405,8 @@ export function evidence(): Evidence {
  * document and a number in the code are kept from drifting apart.
  */
 export function evidenceReport(): string {
-  const { accuracy, index, learning, exact } = evidence();
+  const { accuracy, index, learning, exact, unrealised } = evidence();
+  const stock = unrealisedRows(unrealised);
   const small = index[0];
   const large = index[index.length - 1];
   if (small === undefined || large === undefined) {
@@ -446,6 +457,11 @@ export function evidenceReport(): string {
       `${exact.translationReserve} against an adjustment of ` +
       `${exact.translationAdjustment}, residual ${exact.groupResidual}`,
   );
+  row("The same quarter read as a markup on cost and as a margin on price", stock.conventions);
+  row(
+    "One consignment of intragroup stock, sent up to the parent and then down to the subsidiary",
+    stock.attribution,
+  );
 
   lines.push("");
   lines.push("2. The same figures, spelled out");
@@ -475,6 +491,7 @@ export function evidenceReport(): string {
     `   exact: trial balance difference ${exact.trialBalanceDifference}, ` +
       `consolidation residual ${exact.groupResidual}`,
   );
+  for (const line of stock.spelled) lines.push(line);
   lines.push("");
   lines.push("every figure above is inside the band the README states");
 

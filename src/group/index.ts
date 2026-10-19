@@ -48,6 +48,17 @@ export {
   renderEliminations,
 } from "./intercompany.js";
 export {
+  type IntragroupStockDeclaration,
+  type ProfitBasis,
+  type UnprovidedStock,
+  type UnrealisedProfit,
+  type UnrealisedProfitOptions,
+  type UnrealisedProfitProvision,
+  profitFractionOf,
+  provideForUnrealisedProfit,
+  renderUnrealisedProfit,
+} from "./unrealised.js";
+export {
   type ControlWindow,
   controlWindow,
   controlWindows,

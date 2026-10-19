@@ -1653,6 +1653,7 @@ function consolidateCommand(environment: CliEnvironment, argv: readonly string[]
     ...(methodText === undefined ? {} : { averageMethod: methodText }),
     ...(group.equityBasis === null ? {} : { equityBasis: group.equityBasis }),
     intercompany: group.intercompany,
+    intragroupStock: group.intragroupStock,
     acquisitions: group.acquisitions,
     disposals: group.disposals,
   });
@@ -1771,6 +1772,18 @@ function consolidateCommand(environment: CliEnvironment, argv: readonly string[]
             unpaired: result.eliminations.unmatched.map((item) => ({
               entity: item.side.entity,
               account: item.side.account,
+              reason: item.reason,
+            })),
+          },
+          unrealisedProfit: {
+            consignments: result.unrealisedProfit.items.length,
+            provided: result.unrealisedProfit.totalProvision.toDecimalString(),
+            groupShare: result.unrealisedProfit.totalGroupShare.toDecimalString(),
+            nciShare: result.unrealisedProfit.totalNciShare.toDecimalString(),
+            notProvided: result.unrealisedProfit.unprovided.map((item) => ({
+              seller: item.declaration.seller,
+              holder: item.declaration.holder,
+              account: item.declaration.account,
               reason: item.reason,
             })),
           },
