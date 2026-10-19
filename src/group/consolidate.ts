@@ -74,6 +74,12 @@ import {
   type IntercompanyDeclaration,
   eliminateIntercompany,
 } from "./intercompany.js";
+import {
+  type IntragroupStockDeclaration,
+  type UnrealisedProfitOptions,
+  type UnrealisedProfitProvision,
+  provideForUnrealisedProfit,
+} from "./unrealised.js";
 import type { GroupStructure } from "./structure.js";
 
 /** What each subsidiary contributed to the group's equity, and to whose share. */
@@ -121,6 +127,11 @@ export interface Consolidation {
   readonly period: DateRange;
   readonly aggregation: Aggregation;
   readonly eliminations: Eliminations;
+  /**
+   * The margin on goods the group sold itself and still holds. Empty when
+   * nothing was declared, which is not the same as nothing being there.
+   */
+  readonly unrealisedProfit: UnrealisedProfitProvision;
   readonly workings: readonly SubsidiaryWorking[];
   readonly disposals: readonly DisposalWorking[];
   /** The gain on companies sold during the period, less the losses. */
@@ -156,6 +167,12 @@ export interface ConsolidationOptions {
   equityBasis?: "historical" | "closing";
   rounding?: RoundingMode;
   intercompany?: readonly IntercompanyDeclaration[];
+  /**
+   * Goods one group company sold another and which are still in the buyer's
+   * stock. Declared rather than inferred: nothing in either company's books
+   * says where its stock came from.
+   */
+  intragroupStock?: readonly IntragroupStockDeclaration[];
   acquisitions?: readonly AcquisitionInput[];
   disposals?: readonly DisposalInput[];
   /** Where an entity's pre-acquisition result goes. Retained earnings by default. */
@@ -168,6 +185,8 @@ export interface ConsolidationOptions {
   wholePeriodRegardless?: boolean;
   /** Passed through to the elimination pass. */
   elimination?: Omit<EliminationOptions, "chart">;
+  /** Passed through to the unrealised profit pass. */
+  unrealisedProfit?: Omit<UnrealisedProfitOptions, "chart" | "rounding">;
 }
 
 function sumRows(
@@ -276,6 +295,13 @@ export function consolidate(
     { ...(options.elimination ?? {}), chart },
   );
 
+  const unrealisedProfit = provideForUnrealisedProfit(
+    group,
+    aggregation,
+    options.intragroupStock ?? [],
+    { ...(options.unrealisedProfit ?? {}), chart, rounding },
+  );
+
   const acquired = acquisitions(group, ledgers, options.acquisitions ?? [], {
     rates: options.rates,
     presentation,
@@ -348,6 +374,16 @@ export function consolidate(
 
   // ---------------------------------------------------- 2. the eliminations
   entries.push(...eliminations.entries);
+
+  // ------------------------------------- 2a. the margin the group kept itself
+  //
+  // After the eliminations and before the outside stake is struck, because the
+  // provision reduces a claim that has not been recognised yet. Its own share
+  // of the charge is taken straight off the non-controlling interest, since
+  // the subsidiary's books still carry the whole margin and the share of the
+  // result computed from them below is therefore a share of a profit that is
+  // partly imaginary.
+  entries.push(...unrealisedProfit.entries);
 
   // ------------------------------- 3 and 4. investment, goodwill, the outside stake
   const workings: SubsidiaryWorking[] = [];
@@ -585,6 +621,7 @@ export function consolidate(
     period: aggregation.period,
     aggregation,
     eliminations,
+    unrealisedProfit,
     workings: Object.freeze(workings),
     disposals: Object.freeze(disposalWorkings),
     disposalResult,
@@ -702,6 +739,19 @@ export function renderConsolidation(result: Consolidation): string {
         ? label("Loss on disposals", result.disposalResult.negated())
         : label("Gain on disposals", result.disposalResult),
     );
+  }
+  if (!result.unrealisedProfit.totalProvision.isZero) {
+    lines.push(
+      label("Unrealised profit on intragroup stock", result.unrealisedProfit.totalProvision.negated()),
+    );
+    if (!result.unrealisedProfit.totalNciShare.isZero) {
+      lines.push(
+        label("  borne by the stakes outside the sellers", result.unrealisedProfit.totalNciShare.negated()),
+      );
+    }
+  }
+  for (const item of result.unrealisedProfit.unprovided) {
+    lines.push(`  NOT PROVIDED ${item.declaration.seller} into ${item.declaration.holder} — ${item.reason}`);
   }
   lines.push(label("Non-controlling interest", result.nonControllingInterest));
   lines.push(label("Translation reserve", result.translationReserve));
