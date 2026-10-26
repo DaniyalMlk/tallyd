@@ -236,12 +236,25 @@ export function aggregate(
     }
 
     // A company that has gone is read on the day it went. Its closing rate is
-    // that day's, because that is the day its net assets were handed over, and
-    // its average is taken over the window rather than the period: the months
-    // after the sale are not the group's, and neither are their rates.
+    // that day's, because that is the day its net assets were handed over.
     const readAt = control.consolidateAt;
+
+    // And the average is taken over the window, at both ends of it. The months
+    // after a sale are not the group's and neither are their rates; the months
+    // before an acquisition are not the group's either, and the symmetry is the
+    // whole of the argument. What is left on the income accounts after the
+    // pre-acquisition close is the result of the part of the year the group
+    // owned, so the rate it is translated at has to be the average over that
+    // same part. Averaging over the whole period mixes in rates from months
+    // whose result has already been taken out — an error with no symptom, since
+    // what it produces is a perfectly plausible number.
+    //
+    // Where the caller asked for the whole period regardless, the window is not
+    // applied to the books and must not be applied to the rate either: a result
+    // that includes the pre-acquisition months belongs at an average that
+    // includes them, or the figure is neither one thing nor the other.
     const averageOver =
-      control.disposedDuring && control.window !== null ? control.window : options.period;
+      windowApplied && control.window !== null ? control.window : options.period;
 
     const translation = translate(ledger, {
       presentation,
