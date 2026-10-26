@@ -239,6 +239,42 @@ all disagree slightly.
       mirror-image disposal, on one set of books, so the two ends can be
       compared rather than described.
 
+- [x] **20 — Goodwill written down.** An impairment is a judgement the group
+      makes about the business it bought, so it is declared rather than
+      inferred — and declared as an event with a date rather than as a running
+      total. The date is required for two reasons and the second is the one
+      that forced it: a loss is translated at the rate on the day it was
+      recognised, so a total with no date has no rate; and given a list of
+      events any reporting date can work out both what has been written off by
+      then and what was written off *during the period*, which are different
+      figures and belong in different places. A cumulative total cannot tell
+      those apart, so a comparative column would charge the whole history to
+      the later year and the figure would look plausible.
+      The write-off comes off the measurement in the subsidiary's own currency
+      before any rate touches it: what is retranslated is what is left. The
+      exchange difference is then measured against cost less everything taken
+      out through the income statement at the rates those write-offs took, so
+      a write-off recognised at the closing rate leaves the difference exactly
+      as it would have been with none — the asset and the figure it is measured
+      against shrink together. Where the rates differ, the part of the
+      difference already through the income statement stays there.
+      Its share of the charge is the outside stake's *ownership* fraction,
+      where its share of the exchange difference was its share of the goodwill.
+      The two look alike and are not: a remeasurement of an asset follows
+      whoever owns the asset, and a loss of the period is shared the way every
+      result is. On the cross-border fixture the ownership basis gives the
+      stake nearly four times what the goodwill basis would. Under the
+      proportionate method the balance sheet carries only the group's own
+      goodwill, so the only write-down recognisable against it is the group's,
+      however much of the company the stake holds. That share comes out of the
+      result and not out of reserves brought forward — the engine's own
+      balancing figure is untouched by a write-off recognised in the period,
+      and reduced by the group's share of one recognised earlier, which is
+      where a prior year's loss belongs.
+      A disposal derecognises what was left. The workings print cost, what has
+      been written off with this period's part of it named, and the
+      retranslation, in a column that adds down to the carrying amount.
+
 ## Current state
 
 | Module | What it does |
@@ -385,10 +421,17 @@ all disagree slightly.
   equity accounted, so a 30% holding shows in the group's books at whatever the
   investment cost and nothing of its results reaches the consolidated income
   statement.
-- Goodwill is measured once and never impaired. It is retranslated at the
-  closing rate, as goodwill arising on a foreign operation should be, but
-  nothing ever writes it down: an impairment is a judgement about the business
-  the group bought and there is no way to express one.
+- An impairment is declared, never computed. The group says what goodwill is
+  worth less by; nothing compares a carrying amount with a recoverable one,
+  because a recoverable amount is a forecast and this engine does not hold
+  forecasts. What follows from an impairment is modelled; deciding there should
+  be one is not.
+- Where the outside stake was measured proportionately, the standard grosses up
+  a partly-recognised impairment to compare it with the recoverable amount, and
+  that gross-up is not modelled. The recognised loss is the group's own, which
+  is right, but a declared write-off larger than the stake's attributed
+  goodwill is refused rather than grossed up — a refusal with a reason rather
+  than a guess, and a gap all the same.
 - Fair value adjustments on acquisition can only be given as a single figure for
   the net assets acquired. There is no way to say which asset was written up, so
   nothing depreciates the uplift afterwards.
