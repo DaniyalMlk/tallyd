@@ -59,13 +59,19 @@
 import { Money } from "../money/money.js";
 import type { Currency } from "../money/currency.js";
 import type { RoundingMode } from "../money/rounding.js";
-import { type CalendarDate, date as parseDate } from "../ledger/date.js";
+import { type CalendarDate, type DateRange, date as parseDate } from "../ledger/date.js";
 import type { Ledger } from "../ledger/ledger.js";
 import type { RateTable } from "../fx/table.js";
 import { Interest } from "./interest.js";
 import { GroupError, type GroupStructure } from "./structure.js";
 import { GROUP_ACCOUNTS } from "./accounts.js";
-import { type Acquisition, type GoodwillCarrying, goodwillAt, netAssets } from "./acquisition.js";
+import {
+  type Acquisition,
+  type GoodwillCarrying,
+  type GoodwillImpairment,
+  goodwillAt,
+  netAssets,
+} from "./acquisition.js";
 
 export interface DisposalInput {
   /** The company sold. */
@@ -143,6 +149,14 @@ export interface DisposalOptions {
   rates: RateTable;
   presentation: Currency;
   rounding?: RoundingMode;
+  /**
+   * What the group had written off the goodwill before the company went. The
+   * carrying amount that comes off has to be net of it, or the disposal takes
+   * off an asset the balance sheet stopped showing.
+   */
+  goodwillImpairments?: readonly GoodwillImpairment[];
+  /** The reporting period, so a write-off inside it is this period's charge. */
+  period?: DateRange;
   /**
    * The net assets of each entity as the consolidation itself measures them,
    * by entity code. Taken in preference to the entity's own books, so that the
@@ -274,7 +288,12 @@ export function disposalOf(
   // measure the gain against a carrying amount the balance sheet never showed.
   const goodwillCarrying = goodwillAt(
     acquisition,
-    { rates: options.rates, rounding },
+    {
+      rates: options.rates,
+      rounding,
+      impairments: options.goodwillImpairments ?? [],
+      ...(options.period === undefined ? {} : { period: options.period }),
+    },
     disposed,
   );
   const nciAtDisposal = nci
