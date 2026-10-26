@@ -1,98 +1,21 @@
 import { describe, expect, it } from "vitest";
-import { JournalEntry } from "../src/ledger/entry.js";
-import { Ledger } from "../src/ledger/ledger.js";
-import type { ChartOfAccounts } from "../src/accounts/chart.js";
-import type { Currency } from "../src/money/currency.js";
 import { EUR, GBP } from "../src/money/currency.js";
 import { Money } from "../src/money/money.js";
+import { date } from "../src/ledger/date.js";
 import { RateTable } from "../src/fx/table.js";
 import { GroupError, GroupStructure } from "../src/group/structure.js";
-import { groupChart } from "../src/group/accounts.js";
-import { type Acquisition, acquisitionOf, netAssets } from "../src/group/acquisition.js";
-
-const GBP_CHART = groupChart("GBP");
-const EUR_CHART = groupChart("EUR");
-
-interface Leg {
-  id: string;
-  date: string;
-  narration: string;
-  debit: string;
-  credit: string;
-  amount: string;
-}
-
-function ledgerOf(chart: ChartOfAccounts, currency: Currency, legs: readonly Leg[]): Ledger {
-  return Ledger.from(
-    legs.map((leg) =>
-      JournalEntry.simple(
-        { ...leg, amount: Money.parse(leg.amount, currency) },
-        chart,
-      ),
-    ),
-    chart,
-  );
-}
-
-// ---------------------------------------------------------------------------
-// A sterling parent and a subsidiary that keeps its books in euro.
-//
-// Unlike every other group fixture in this suite, the rate here MOVES. The
-// others hold EUR/GBP at 0.50 on every date that matters, which keeps their
-// hand-worked figures checkable and means nothing in them can see a
-// translation take the wrong rate.
-//
-//   S was formed with 60,000 EUR of capital and nothing else had happened
-//   when P bought 80% of it on 2025-01-01 for 80,000 GBP.
-//   EUR/GBP was 0.80 that day, so the price was 100,000 EUR.
-//
-// Worked by hand, in euro, which is the currency the arithmetic belongs in:
-//   Consideration                     = 80,000 GBP / 0.80  = 100,000 EUR
-//   NCI at acquisition, proportionate = 20% x 60,000       =  12,000 EUR
-//   Goodwill                          = 100,000 + 12,000 - 60,000
-//                                                          =  52,000 EUR
-//   Goodwill at the acquisition rate  = 52,000 x 0.80       =  41,600 GBP
-// ---------------------------------------------------------------------------
-
-const PARENT = ledgerOf(GBP_CHART, GBP, [
-  { id: "P-CAP", date: "2024-12-31", narration: "Capital", debit: "1110", credit: "3100", amount: "500000.00" },
-  { id: "P-INV", date: "2025-01-01", narration: "Bought 80% of S", debit: "1230", credit: "1110", amount: "80000.00" },
-]);
-
-const SUB = ledgerOf(EUR_CHART, EUR, [
-  { id: "S-CAP", date: "2024-12-31", narration: "Capital", debit: "1110", credit: "3100", amount: "60000.00" },
-  { id: "S-RES", date: "2025-06-30", narration: "Reserves brought forward", debit: "1110", credit: "3200", amount: "20000.00" },
-  { id: "S-INC", date: "2026-06-30", narration: "Sales", debit: "1110", credit: "4100", amount: "40000.00" },
-  { id: "S-EXP", date: "2026-06-30", narration: "Cost of sales", debit: "5100", credit: "1110", amount: "30000.00" },
-]);
-
-/** EUR/GBP at 0.80 through 2025, drifting to 0.90 by the end of 2026. */
-export const MOVING_RATES = RateTable.of(
-  [
-    { date: "2024-12-01", base: "EUR", quote: "GBP", rate: "0.8000" },
-    { date: "2024-12-31", base: "EUR", quote: "GBP", rate: "0.8000" },
-    { date: "2025-06-30", base: "EUR", quote: "GBP", rate: "0.8000" },
-    { date: "2025-12-31", base: "EUR", quote: "GBP", rate: "0.8000" },
-    { date: "2026-01-31", base: "EUR", quote: "GBP", rate: "0.8200" },
-    { date: "2026-03-31", base: "EUR", quote: "GBP", rate: "0.8400" },
-    { date: "2026-06-30", base: "EUR", quote: "GBP", rate: "0.8500" },
-    { date: "2026-09-30", base: "EUR", quote: "GBP", rate: "0.8700" },
-    { date: "2026-12-31", base: "EUR", quote: "GBP", rate: "0.9000" },
-  ],
-  { maxStaleDays: 400 },
-);
-
-export const FOREIGN_GROUP = GroupStructure.build(
-  [
-    { code: "P", name: "Parent Ltd", currency: GBP },
-    { code: "S", name: "Sub GmbH", currency: EUR, parent: "P", holding: "80", acquired: "2025-01-01" },
-  ],
-  { presentation: "GBP", name: "Cross-border Group" },
-);
-
-export const FOREIGN_LEDGERS = { P: PARENT, S: SUB };
-
-export const FOREIGN_ACQUISITION = { entity: "S", consideration: Money.parse("80000.00", GBP) };
+import { type Acquisition, acquisitionOf, netAssets, renderAcquisition } from "../src/group/acquisition.js";
+import {
+  EUR_CHART,
+  FOREIGN_ACQUISITION,
+  FOREIGN_GROUP,
+  FOREIGN_LEDGERS,
+  FOREIGN_PARENT,
+  FOREIGN_SUB,
+  GBP_CHART,
+  MOVING_RATES,
+  ledgerOf,
+} from "./foreignGroup.js";
 
 function acquire(): Acquisition {
   return acquisitionOf(FOREIGN_GROUP, FOREIGN_LEDGERS, FOREIGN_ACQUISITION, {
@@ -106,7 +29,7 @@ describe("goodwill on a foreign operation is measured in the subsidiary's curren
     const a = acquire();
     expect(a.functional.code).toBe("EUR");
     expect(a.presentation.code).toBe("GBP");
-    expect(netAssets(SUB, "2025-01-01", EUR).toString()).toBe("60000.00 EUR");
+    expect(netAssets(FOREIGN_SUB, date("2025-01-01"), EUR).toString()).toBe("60000.00 EUR");
     expect(a.netAssetsAcquiredIn.functional.toString()).toBe("60000.00 EUR");
   });
 
@@ -164,23 +87,67 @@ describe("goodwill on a foreign operation is measured in the subsidiary's curren
   });
 });
 
-describe("a group reporting in its subsidiary's currency is untouched", () => {
-  const STERLING = GroupStructure.build(
-    [
-      { code: "P", name: "Parent Ltd", currency: GBP },
-      { code: "S", name: "Sub Ltd", currency: GBP, parent: "P", holding: "80", acquired: "2025-01-01" },
-    ],
-    { presentation: "GBP", name: "The Group" },
-  );
-  const STERLING_SUB = ledgerOf(GBP_CHART, GBP, [
-    { id: "S-CAP", date: "2024-12-31", narration: "Capital", debit: "1110", credit: "3100", amount: "50000.00" },
-  ]);
+describe("the rendered workings show both currencies", () => {
+  it("heads two columns and adds up down each of them", () => {
+    const a = acquire();
+    const text = renderAcquisition(a);
+    const lines = text.split("\n");
+    expect(lines[1]).toMatch(/EUR\s+GBP\s*$/);
 
+    // Every figure line carries two amounts, and each column is the sum its
+    // own three rows imply.
+    const figures = (label: string): readonly string[] => {
+      const line = lines.find((l) => l.trimStart().startsWith(label));
+      expect(line, `no line for ${label}`).toBeDefined();
+      return (line as string).trim().split(/\s{2,}/).slice(1);
+    };
+    for (const [column, scale] of [
+      [0, 1],
+      [1, 1],
+    ] as const) {
+      void scale;
+      const sum =
+        Number(figures("Consideration")[column]) +
+        Number(figures("Non-controlling")[column]) +
+        Number(figures("Net assets")[column]);
+      expect(sum).toBeCloseTo(Number(figures("Goodwill")[column]), 2);
+    }
+    expect(figures("Goodwill")).toEqual(["52000.00", "41600.00"]);
+    expect(text).toContain("an asset of that operation");
+  });
+
+  it("stays a single column when there is nothing to translate", () => {
+    const a = acquisitionOf(
+      STERLING,
+      { P: FOREIGN_PARENT, S: STERLING_SUB },
+      { entity: "S", consideration: Money.parse("48000.00", GBP) },
+      { rates: RateTable.empty(), presentation: GBP },
+    );
+    const lines = renderAcquisition(a).split("\n");
+    expect(lines[1]).not.toMatch(/GBP\s+GBP/);
+    expect(lines.some((l) => l.includes("an asset of that operation"))).toBe(false);
+    expect(lines[1]?.trim().split(/\s{2,}/)).toEqual(["Consideration transferred", "48000.00"]);
+  });
+});
+
+const STERLING = GroupStructure.build(
+  [
+    { code: "P", name: "Parent Ltd", currency: GBP },
+    { code: "S", name: "Sub Ltd", currency: GBP, parent: "P", holding: "80", acquired: "2025-01-01" },
+  ],
+  { presentation: "GBP", name: "The Group" },
+);
+
+const STERLING_SUB = ledgerOf(GBP_CHART, GBP, [
+  { id: "S-CAP", date: "2024-12-31", narration: "Capital", debit: "1110", credit: "3100", amount: "50000.00" },
+]);
+
+describe("a group reporting in its subsidiary's currency is untouched", () => {
   it("looks up no rate at all and gives both sides the same amount", () => {
     // An empty table: any lookup would throw, so passing proves none happened.
     const a = acquisitionOf(
       STERLING,
-      { P: PARENT, S: STERLING_SUB },
+      { P: FOREIGN_PARENT, S: STERLING_SUB },
       { entity: "S", consideration: Money.parse("48000.00", GBP) },
       { rates: RateTable.empty(), presentation: GBP },
     );
@@ -223,7 +190,7 @@ describe("the residual is taken before the translation, not after", () => {
   const odd = (): Acquisition =>
     acquisitionOf(
       FOREIGN_GROUP,
-      { P: PARENT, S: ODD_SUB },
+      { P: FOREIGN_PARENT, S: ODD_SUB },
       {
         entity: "S",
         consideration: Money.parse("100000.05", EUR),
