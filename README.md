@@ -24,7 +24,8 @@ of them moves:
 | Candidate pairs the amount-and-date index lets through to scoring | 269 of 90,144 (335x), 1,172 of 1,760,979 (1503x) at 1,419 movements |
 | A counterparty confirmed once, in the next period's unrelated books | recall 75.6% to 89.0%, queue 16 to 5 (68.8% shorter), precision still 1.000 |
 | Trial balance over 625 generated journal entries | 640042.62 GBP against 640042.62 GBP, difference 0.00 GBP |
-| A three-company, three-currency consolidation | 9 balanced entries, translation reserve -22164.01 GBP against an adjustment of 22164.01 GBP, residual 0.00 GBP |
+| A three-company, three-currency consolidation | 9 balanced entries, residual 0.00 GBP |
+| The translation reserve against the two things that are in it | -27117.51 GBP against adjustments of 22164.01 GBP and -4953.50 GBP of goodwill retranslated, unaccounted for 0.00 GBP |
 | The same quarter read as a markup on cost and as a margin on price | 20000.00 and 25000.00 on the same 100000.00 of stock, the second carrying goods that cost 80000.00 at 75000.00 |
 | One consignment of intragroup stock, sent up to the parent and then down to the subsidiary | stock down 20000.00 either way; the outside quarter bears 5000.00 when its company sold and 0.00 when it only bought |
 
@@ -49,11 +50,16 @@ ledger movements against 1,241 statement lines — 1,172 pairs are scored out of
 the 1,760,979 a matcher comparing everything to everything would look at.
 
 **Zero means zero.** Amounts are integer minor units, so a trial balance either
-balances or it does not; there is no tolerance to pick. The consolidation row is
-there because three companies kept in three currencies have to be translated at
-different rates and the difference has to land somewhere — and it lands in the
-translation reserve, which comes back as the translation adjustment with its
-sign flipped rather than as whatever made the page add up.
+balances or it does not; there is no tolerance to pick. The consolidation rows
+are there because three companies kept in three currencies have to be translated
+at different rates and the difference has to land somewhere — and it lands in
+the translation reserve, which comes back from its own two components rather
+than from whatever made the page add up. Those two are the entities' own
+translation adjustments, and the exchange difference on goodwill, which is in no
+entity's books at all because goodwill exists only at the group level. Both are
+substantial on this group and the reserve is neither of them, which is what
+makes the row worth printing: an identity whose second term happened to be nil
+would hold no matter what the engine did with it.
 
 ```bash
 npm run demo:evidence     # all six, non-zero if a figure moves

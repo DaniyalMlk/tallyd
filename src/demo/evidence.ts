@@ -26,6 +26,7 @@
  * a printout.
  */
 
+import { sumMoney } from "../money/money.js";
 import { generateBooks } from "./generator.js";
 import {
   checkUnrealised,
@@ -261,6 +262,13 @@ export interface ExactArithmetic {
   readonly groupDifference: string;
   readonly translationAdjustment: string;
   readonly translationReserve: string;
+  /** The group's share of the exchange difference on goodwill. */
+  readonly goodwillExchangeDifference: string;
+  /**
+   * `reserve + adjustment - goodwill difference`, which is nil: the reserve is
+   * those two things and nothing else.
+   */
+  readonly reserveResidual: string;
   readonly groupResidual: string;
   readonly groupBalanced: boolean;
 }
@@ -272,8 +280,18 @@ export interface ExactArithmetic {
  * does not; there is no tolerance to choose. The interesting case is the
  * consolidation, because three companies kept in three currencies have to be
  * translated at different rates and the difference has to land *somewhere*.
- * It lands in the translation reserve, and the reserve is the adjustment with
- * its sign flipped rather than whatever was needed to make the page add up.
+ * It lands in the translation reserve, and the reserve is accounted for by
+ * what went into it rather than being whatever was needed to make the page add
+ * up. Two things go in. The entities' own translation adjustments, which is
+ * the residual of restating their books; and the exchange difference on
+ * goodwill, which is in no entity's books because goodwill exists only at the
+ * group level. The claim is that the three agree to the minor unit:
+ *
+ *     reserve + adjustments - the group's share of the goodwill difference = 0
+ *
+ * Quoting the reserve against the adjustments alone was a weaker claim even
+ * before goodwill was retranslated, because it could only ever be checked
+ * against one of the two things in it.
  */
 export function exactArithmetic(): ExactArithmetic {
   const generated = generateBooks({
@@ -284,6 +302,10 @@ export function exactArithmetic(): ExactArithmetic {
   });
   const balance = trialBalance(generated.ledger);
   const group = consolidatedGroup();
+  const goodwillDifference = sumMoney(
+    group.workings.map((working) => working.goodwillCarrying.groupExchangeDifference),
+    group.presentation,
+  );
 
   return {
     entries: generated.ledger.size,
@@ -294,6 +316,11 @@ export function exactArithmetic(): ExactArithmetic {
     groupDifference: group.trialBalance.difference.toString(),
     translationAdjustment: group.aggregation.translationAdjustment.toString(),
     translationReserve: group.translationReserve.toString(),
+    goodwillExchangeDifference: goodwillDifference.toString(),
+    reserveResidual: group.translationReserve
+      .plus(group.aggregation.translationAdjustment)
+      .minus(goodwillDifference)
+      .toString(),
     groupResidual: group.residual.toString(),
     groupBalanced: group.balanced,
   };
@@ -453,9 +480,13 @@ export function evidenceReport(): string {
   );
   row(
     "A three-company, three-currency consolidation",
-    `${exact.groupEntries} balanced entries, translation reserve ` +
-      `${exact.translationReserve} against an adjustment of ` +
-      `${exact.translationAdjustment}, residual ${exact.groupResidual}`,
+    `${exact.groupEntries} balanced entries, residual ${exact.groupResidual}`,
+  );
+  row(
+    "The translation reserve against the two things that are in it",
+    `${exact.translationReserve} against adjustments of ${exact.translationAdjustment} ` +
+      `and ${exact.goodwillExchangeDifference} of goodwill retranslated, ` +
+      `unaccounted for ${exact.reserveResidual}`,
   );
   row("The same quarter read as a markup on cost and as a margin on price", stock.conventions);
   row(
