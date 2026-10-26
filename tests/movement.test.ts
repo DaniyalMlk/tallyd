@@ -292,10 +292,17 @@ describe("the translation reserve, rolled forward", () => {
     expect(schedule.reconciles).toBe(true);
   });
 
-  it("names the entity behind each movement", () => {
+  it("names the entity behind each movement, and what in it moved", () => {
+    // Two things reach the reserve for each entity and they come from
+    // different places: the residual of restating that entity's own books,
+    // and the sterling amount its goodwill is carried at. Goodwill is in
+    // nobody's books, so it needs a line of its own or it reads as
+    // unexplained.
     expect(schedule.lines.map((l) => l.label)).toEqual([
       "HN — movement on retranslation",
       "HS — movement on retranslation",
+      "HN — goodwill retranslated",
+      "HS — goodwill retranslated",
     ]);
   });
 
@@ -355,7 +362,8 @@ describe("how the schedules read", () => {
     expect(text).toContain("Non-controlling interest");
     expect(text).toContain("At the start of the period");
     expect(text).toContain("At the reporting date");
-    expect(text).toContain("174052.58");
+    expect(text).toContain("173748.58");
+    expect(text).toContain("Its own goodwill, retranslated");
     expect(text).not.toContain("Not explained");
   });
 

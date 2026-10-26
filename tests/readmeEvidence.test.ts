@@ -36,7 +36,8 @@ const QUOTED = [
   "269 of 90,144 (335x), 1,172 of 1,760,979 (1503x) at 1,419 movements",
   "recall 75.6% to 89.0%, queue 16 to 5 (68.8% shorter), precision still 1.000",
   "640042.62 GBP against 640042.62 GBP, difference 0.00 GBP",
-  "9 balanced entries, translation reserve -22164.01 GBP against an adjustment of 22164.01 GBP, residual 0.00 GBP",
+  "9 balanced entries, residual 0.00 GBP",
+  "-27117.51 GBP against adjustments of 22164.01 GBP and -4953.50 GBP of goodwill retranslated, unaccounted for 0.00 GBP",
   "20000.00 and 25000.00 on the same 100000.00 of stock, the second carrying goods that cost 80000.00 at 75000.00",
   "stock down 20000.00 either way; the outside quarter bears 5000.00 when its company sold and 0.00 when it only bought",
 ] as const;
@@ -53,6 +54,7 @@ const ROWS = [
   "A counterparty confirmed once, in the next period's unrelated books",
   "Trial balance over 625 generated journal entries",
   "A three-company, three-currency consolidation",
+  "The translation reserve against the two things that are in it",
   "The same quarter read as a markup on cost and as a margin on price",
   "One consignment of intragroup stock, sent up to the parent and then down to the subsidiary",
 ] as const;
@@ -130,13 +132,33 @@ describe("the bands the front page's prose claims", () => {
     expect(measured.exact.groupBalanced).toBe(true);
   });
 
-  it("balances the translation reserve against the adjustment exactly", () => {
-    // The claim in the prose is that the reserve is the adjustment with its
-    // sign flipped, which is what distinguishes it from a plug. Read as
-    // strings, because that is what the README prints.
-    const adjustment = measured.exact.translationAdjustment;
+  it("accounts for the translation reserve by the two things that are in it", () => {
+    // What distinguishes the reserve from a plug is that it can be arrived at
+    // from its components. There are two: the entities' own translation
+    // adjustments, and the exchange difference on goodwill, which is in no
+    // entity's books because goodwill exists only at the group level.
+    //
+    //     reserve + adjustments - the group's goodwill difference = 0
+    expect(measured.exact.reserveResidual).toBe("0.00 GBP");
+  });
+
+  it("is not that identity holding because one side of it is nil", () => {
+    // The reserve used to be quoted against the adjustments alone, and that
+    // claim was checkable only because the second term happened to be zero.
+    // An identity whose terms do not differ proves nothing, so the thing to
+    // assert beside it is that they do: both components are substantial, and
+    // the reserve is neither of them.
     const reserve = measured.exact.translationReserve;
-    expect(reserve).toBe(`-${adjustment}`);
+    const adjustment = measured.exact.translationAdjustment;
+    const goodwill = measured.exact.goodwillExchangeDifference;
+    expect(goodwill).not.toBe("0.00 GBP");
+    expect(adjustment).not.toBe("0.00 GBP");
+    expect(reserve).not.toBe(`-${adjustment}`);
+    // And the goodwill term is a fifth of the reserve rather than a rounding
+    // of it: a term this size cannot hide inside a tolerance.
+    const share = Math.abs(Number(goodwill.split(" ")[0])) / Math.abs(Number(reserve.split(" ")[0]));
+    expect(share).toBeGreaterThan(0.1);
+    expect(share).toBeLessThan(0.5);
   });
 });
 
