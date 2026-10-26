@@ -520,3 +520,100 @@ export function renderNetAssetsMovements(
   }
   return out.join("\n");
 }
+
+/**
+ * The goodwill account, from one reporting date to the next.
+ *
+ * The one balance on a consolidated balance sheet that nothing in any
+ * company's books explains, and until now the only group figure with no
+ * schedule. The outside stake and the translation reserve each got one because
+ * a reader cannot see what moved them; goodwill is worse, because four quite
+ * different things move it and three of them are invisible in the comparative:
+ *
+ * 1. **Arising on acquisition.** A company bought in the period brings its
+ *    goodwill with it, at the rate on the day the bargain was struck.
+ * 2. **Written off.** What the group has decided the business it bought is
+ *    worth less by, at the rate on the day it decided.
+ * 3. **Retranslated.** Goodwill on a foreign operation is an asset of that
+ *    operation and takes its closing rate, so the sterling figure moves every
+ *    year without anything happening inside the company at all.
+ * 4. **Derecognised on a disposal.** What came off with a company that left,
+ *    at what the group was carrying it at the day it went.
+ *
+ * Any two of those can cancel. Goodwill flat across a comparative can mean
+ * nothing happened, or it can mean a write-off and a favourable rate move of
+ * the same size, which are not the same news. So the schedule reports all four
+ * rather than the arithmetic difference, and reconciles against what the
+ * goodwill account actually says.
+ *
+ * Note which figure each line is measured at. The write-off is at the rate it
+ * was recognised at and the retranslation is everything the closing rate did
+ * on top of that, which is the same division the carrying amount is built from:
+ * take the write-off at the closing rate instead and the two lines would both
+ * be wrong while still adding to the right total.
+ */
+export function goodwillSchedule(
+  prior: Consolidation,
+  current: Consolidation,
+): MovementSchedule {
+  const priorWorkings = new Map(prior.workings.map((w) => [w.entity, w] as const));
+
+  const lines: MovementLine[] = [];
+  const push = (label: string, amount: Money): void => {
+    if (!amount.isZero) lines.push({ label, amount });
+  };
+
+  for (const working of current.workings) {
+    const before = priorWorkings.get(working.entity);
+    const carrying = working.goodwillCarrying;
+    if (before === undefined) {
+      // New to the page. Everything about it arises in the period, split the
+      // same way as for a company already there, so a first period reads the
+      // same as a later one.
+      push(
+        `${working.entity} — arising on acquisition`,
+        carrying.atAcquisition.plus(carrying.recognisedToDate),
+      );
+      push(`${working.entity} — written off`, carrying.recognisedToDate.negated());
+      push(`${working.entity} — retranslated`, carrying.exchangeDifference);
+      continue;
+    }
+    const was = before.goodwillCarrying;
+    push(
+      `${working.entity} — written off`,
+      carrying.recognisedToDate.minus(was.recognisedToDate).negated(),
+    );
+    push(
+      `${working.entity} — retranslated`,
+      carrying.exchangeDifference.minus(was.exchangeDifference),
+    );
+  }
+
+  for (const disposal of current.disposals) {
+    push(`${disposal.entity} — derecognised on disposal`, disposal.goodwillRemoved.negated());
+  }
+
+  // A company that was on the prior page, is not on this one, and did not
+  // leave through a declared disposal. Its goodwill went somewhere and saying
+  // so is better than leaving the figure under "not explained by the above".
+  const soldHere = new Set(current.disposals.map((d) => d.entity));
+  for (const [entity, before] of priorWorkings) {
+    if (current.workings.some((w) => w.entity === entity) || soldHere.has(entity)) continue;
+    push(`${entity} — no longer consolidated`, before.goodwillCarrying.carrying.negated());
+  }
+
+  const opening = prior.goodwill;
+  const closing = current.goodwill;
+  const rolledForward = lines.reduce((running, line) => running.plus(line.amount), opening);
+  const unexplained = closing.minus(rolledForward);
+
+  return Object.freeze({
+    what: "Goodwill",
+    opening,
+    lines: Object.freeze(lines),
+    closing,
+    unexplained,
+    rolledForward,
+    reconciles: unexplained.isZero,
+  }) as MovementSchedule;
+}

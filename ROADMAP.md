@@ -275,6 +275,26 @@ all disagree slightly.
       been written off with this period's part of it named, and the
       retranslation, in a column that adds down to the carrying amount.
 
+- [x] **21 — A schedule for the one balance nobody's books explain.** Goodwill
+      was the last group figure with a comparative column and no schedule, and
+      it needed one most: four quite different things move it — arising on
+      acquisition, written off, retranslated, derecognised on a disposal — and
+      three of them are invisible in the difference between two columns. Any
+      two can cancel, so goodwill flat across a comparative can mean nothing
+      happened or can mean a write-off and a favourable rate move of the same
+      size, which are not the same news; there is a fixture in the suite where
+      they cancel to within a penny. The schedule reports all four and
+      reconciles against what the goodwill account says rather than against
+      its own lines, which is the difference between a schedule and a
+      restatement. Each line is at the figure that thing moved the account by:
+      a write-off at the rate it was recognised at and the retranslation as
+      whatever the closing rate did on top of that — take the write-off at the
+      closing rate instead and both lines are wrong while still adding to the
+      right total. A company new to the page has its goodwill split the same
+      three ways as one already there, so a first period reads like a later
+      one. It counts towards whether the comparative hangs together, because a
+      schedule outside that flag is a schedule nobody notices.
+
 ## Current state
 
 | Module | What it does |
@@ -483,13 +503,13 @@ all disagree slightly.
   the average over the months before control was obtained, and the
   consolidation now takes exactly that kind of average for the other half of
   the year.
-- The movement schedules explain the outside stake and the translation reserve
-  and nothing else. The group's own reserves and the individual lines of the
-  balance sheet get a comparative column and a movement, which is the
-  arithmetic, but no schedule saying what the movement was made of. Goodwill is
-  a near miss: its movement is named inside the two schedules it feeds, so a
-  reader can see what it did to the reserve and to the outside stake, but it
-  has no schedule of its own rolling the account forward.
+- The movement schedules explain the outside stake, the translation reserve and
+  goodwill, and nothing else. The group's own reserves and the individual lines
+  of the balance sheet get a comparative column and a movement, which is the
+  arithmetic, but no schedule saying what the movement was made of. Reserves
+  are the conspicuous one: a reader who wants to know how much of the movement
+  was this year's result and how much was a prior-year adjustment has to work
+  it out from the three schedules that do exist.
 - The dashboard knows nothing about groups. It reconciles one bank account for
   one company, which is what it is for, but there is no view of a consolidation.
 - The matcher still holds both sides in memory. A year of a busy account

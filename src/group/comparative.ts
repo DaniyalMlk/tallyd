@@ -44,6 +44,7 @@ import {
   type NetAssetsMovement,
   type NciMovement,
   nciMovements,
+  goodwillSchedule,
   nciSchedule,
   netAssetsMovements,
   translationReserveSchedule,
@@ -75,6 +76,12 @@ export interface ComparativeConsolidation {
   readonly nciByEntity: readonly NciMovement[];
   readonly nci: MovementSchedule;
   readonly translationReserve: MovementSchedule;
+  /**
+   * The goodwill account, taken apart. Four different things move it and any
+   * two of them can cancel, so the schedule reports all four rather than the
+   * difference between the two columns.
+   */
+  readonly goodwill: MovementSchedule;
   /** Consolidated at the reporting date and not at the comparative one. */
   readonly entered: readonly string[];
   /** Consolidated at the comparative date and not at the reporting one. */
@@ -167,6 +174,7 @@ export function compareConsolidations(
 
   const nci = nciSchedule(prior, current, options);
   const reserve = translationReserveSchedule(prior, current);
+  const goodwill = goodwillSchedule(prior, current);
 
   return Object.freeze({
     group: current.group,
@@ -180,10 +188,15 @@ export function compareConsolidations(
     nciByEntity: nciMovements(prior, current, options),
     nci,
     translationReserve: reserve,
+    goodwill,
     entered: Object.freeze(entered),
     left: Object.freeze(left),
     sound:
-      current.balanced && prior.balanced && nci.reconciles && reserve.reconciles,
+      current.balanced &&
+      prior.balanced &&
+      nci.reconciles &&
+      reserve.reconciles &&
+      goodwill.reconciles,
   });
 }
 
