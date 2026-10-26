@@ -1821,6 +1821,7 @@ function consolidateCommand(environment: CliEnvironment, argv: readonly string[]
                   })),
                   nonControllingInterest: scheduleToJson(compared.nci),
                   translationReserve: scheduleToJson(compared.translationReserve),
+                  goodwill: scheduleToJson(compared.goodwill),
                 },
               }),
           ...(written === undefined ? {} : { written }),
@@ -1890,6 +1891,8 @@ function consolidateCommand(environment: CliEnvironment, argv: readonly string[]
     sections.push(renderMovementSchedule(compared.nci));
     sections.push("");
     sections.push(renderMovementSchedule(compared.translationReserve));
+    sections.push("");
+    sections.push(renderMovementSchedule(compared.goodwill));
   }
   if (wants("statements")) {
     sections.push("");
