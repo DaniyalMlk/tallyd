@@ -39,6 +39,28 @@
  * the group's point of view, and its goodwill is measured against the price
  * the subsidiary paid. The alternative treatment, which scales the cost of the
  * investment by the group's interest in the buyer, is a known gap.
+ *
+ * ## Which currency the arithmetic happens in
+ *
+ * All of it happens in the currency the acquired company keeps its books in,
+ * and the answer is then translated into the group's. That ordering is not a
+ * matter of taste. Goodwill on a foreign operation is an asset *of that
+ * operation*: what the extra money bought — a name, a position, people who
+ * stay — is a thing in that country, priced in that currency, and the group
+ * owning it does not move it. So the consideration comes the other way for the
+ * purposes of this sum, into the subsidiary's currency at the rate on the day,
+ * and the net assets read from its own books need no translating because they
+ * are already there.
+ *
+ * Doing it the other way round — translating each input into the group's
+ * currency and taking the residual there — gives a figure that cannot be
+ * retranslated afterwards, because there is no functional-currency amount left
+ * to retranslate, and one that carries three roundings instead of one: each
+ * input is rounded on its way across and goodwill is defined as the difference
+ * between them, so the error lands in the one figure with nothing to absorb it.
+ *
+ * A group reporting in the currency its subsidiary already keeps is untouched
+ * by any of this: no rate is looked up and nothing moves.
  */
 
 import { Money } from "../money/money.js";
@@ -78,31 +100,59 @@ export interface AcquisitionInput {
   investmentAccount?: string;
 }
 
+/**
+ * One figure in both currencies.
+ *
+ * `functional` is the measurement — the amount in the currency the acquired
+ * company keeps its books in, which is where the arithmetic happened.
+ * `presentation` is that same amount translated once at the acquisition-date
+ * rate. Where the two currencies are the same they are the same object.
+ */
+export interface AcquiredAmount {
+  readonly functional: Money;
+  readonly presentation: Money;
+}
+
 export interface Acquisition {
   readonly entity: string;
   readonly acquired: CalendarDate;
   readonly groupInterest: Interest;
   readonly nonControllingInterest: Interest;
   readonly measurement: NciMeasurement;
-  /** All figures below are in the group's presentation currency. */
+  /** The currency the acquired company keeps its books in. */
+  readonly functional: Currency;
+  /** The group's presentation currency. */
+  readonly presentation: Currency;
+  /**
+   * All the bare `Money` figures below are in the group's presentation
+   * currency, translated at the acquisition-date rate. The `*In` fields beside
+   * them carry the same figure in both currencies; the functional side is the
+   * measurement and the presentation side is derived from it.
+   */
   readonly consideration: Money;
+  readonly considerationIn: AcquiredAmount;
   readonly netAssetsAcquired: Money;
+  readonly netAssetsAcquiredIn: AcquiredAmount;
   /** True when the net assets came from a figure supplied rather than the books. */
   readonly netAssetsSupplied: boolean;
   readonly nciAtAcquisition: Money;
+  readonly nciAtAcquisitionIn: AcquiredAmount;
   /**
    * Goodwill. Never negative: a price below the net assets acquired shows up
    * in `bargainGain` instead.
    */
   readonly goodwill: Money;
+  readonly goodwillIn: AcquiredAmount;
   /** The excess of net assets acquired over what was paid for them. */
   readonly bargainGain: Money;
+  readonly bargainGainIn: AcquiredAmount;
   /**
    * The part of `nciAtAcquisition` that is not a share of net assets — the
    * goodwill attributed to the outside shareholders. Nil under the
    * proportionate method, by construction.
    */
   readonly nciGoodwill: Money;
+  readonly nciGoodwillIn: AcquiredAmount;
   readonly investmentAccount: string;
 }
 
@@ -126,32 +176,60 @@ export function netAssets(ledger: Ledger, asAt: CalendarDate, currency: Currency
     .reduce((running, row) => running.plus(row.signed), Money.zero(currency));
 }
 
-function intoPresentation(
+/**
+ * One amount into another currency at a given day's rate.
+ *
+ * `why` finishes the sentence "there is no rate on <date>" in the error, so a
+ * caller who has not supplied a quote is told which figure needed it and which
+ * way it was going rather than being handed a bare lookup failure.
+ */
+function convertOn(
   amount: Money,
+  into: Currency,
   options: AcquisitionOptions,
   on: CalendarDate,
   what: string,
 ): Money {
-  if (amount.currency.code === options.presentation.code) return amount;
+  if (amount.currency.code === into.code) return amount;
   try {
     return options.rates
-      .lookup(amount.currency, options.presentation, on)
+      .lookup(amount.currency, into, on)
       .rate.convert(amount, options.rounding ?? "half-even");
   } catch (error) {
     throw new GroupError(
-      `${what} is in ${amount.currency.code} and the group reports in ` +
-        `${options.presentation.code}, but there is no rate on ${on}: ${(error as Error).message}`,
+      `${what} is in ${amount.currency.code} and has to be stated in ${into.code}, ` +
+        `but there is no rate on ${on}: ${(error as Error).message}`,
     );
   }
 }
 
 /**
+ * A functional-currency measurement and its presentation-currency statement.
+ *
+ * The translation happens here and only here, so every figure on an
+ * `Acquisition` is one rounding away from the amount it was measured as.
+ */
+function measured(
+  functional: Money,
+  options: AcquisitionOptions,
+  on: CalendarDate,
+  what: string,
+): AcquiredAmount {
+  return Object.freeze({
+    functional,
+    presentation: convertOn(functional, options.presentation, options, on, what),
+  });
+}
+
+/**
  * Work out goodwill and the non-controlling interest at acquisition.
  *
- * Everything is measured on the day control was obtained and translated at
- * that day's rate, because that is when the bargain was struck; a rate that
+ * Everything is measured on the day control was obtained, in the acquired
+ * company's own currency, and translated at that day's rate. The date is the
+ * acquisition date because that is when the bargain was struck: a rate that
  * moved afterwards changes what the group's investment is worth, not what it
- * paid.
+ * paid. The currency is the subsidiary's because goodwill is an asset of the
+ * subsidiary; see the note at the top of this file.
  */
 export function acquisitionOf(
   group: GroupStructure,
@@ -180,9 +258,14 @@ export function acquisitionOf(
   const acquired = parseDate(acquiredText);
 
   const measurement = input.nciMeasurement ?? "proportionate";
-  const zero = Money.zero(options.presentation);
-  const consideration = intoPresentation(
+  const rounding = options.rounding ?? "half-even";
+  const functional = entity.currency;
+  const zero = Money.zero(functional);
+
+  // Everything below is in the acquired company's own currency.
+  const consideration = convertOn(
     input.consideration,
+    functional,
     options,
     acquired,
     `The consideration for ${entity.code}`,
@@ -191,8 +274,9 @@ export function acquisitionOf(
   let netAssetsAcquired: Money;
   let netAssetsSupplied: boolean;
   if (input.netAssetsAtAcquisition !== undefined) {
-    netAssetsAcquired = intoPresentation(
+    netAssetsAcquired = convertOn(
       input.netAssetsAtAcquisition,
+      functional,
       options,
       acquired,
       `The net assets acquired with ${entity.code}`,
@@ -206,16 +290,12 @@ export function acquisitionOf(
     if (ledger === undefined) {
       throw new GroupError(`No books for ${entity.code}, so its net assets cannot be read`);
     }
-    netAssetsAcquired = intoPresentation(
-      netAssets(ledger, acquired, entity.currency),
-      options,
-      acquired,
-      `The net assets of ${entity.code}`,
-    );
+    netAssetsAcquired = netAssets(ledger, acquired, functional);
     netAssetsSupplied = false;
   }
 
   const nci = entity.nonControlling;
+  const nciShareOfNetAssets = nci.share(netAssetsAcquired, rounding);
   let nciAtAcquisition: Money;
   if (measurement === "fair-value") {
     if (input.nciFairValue === undefined) {
@@ -224,8 +304,9 @@ export function acquisitionOf(
           `figure only the group has: supply nciFairValue or use the proportionate method.`,
       );
     }
-    nciAtAcquisition = intoPresentation(
+    nciAtAcquisition = convertOn(
       input.nciFairValue,
+      functional,
       options,
       acquired,
       `The fair value of the non-controlling interest in ${entity.code}`,
@@ -237,14 +318,44 @@ export function acquisitionOf(
           `proportionately, so the figure would be ignored. Say which is meant.`,
       );
     }
-    nciAtAcquisition = nci.share(netAssetsAcquired, options.rounding ?? "half-even");
+    nciAtAcquisition = nciShareOfNetAssets;
   }
 
   const excess = consideration.plus(nciAtAcquisition).minus(netAssetsAcquired);
   const goodwill = excess.isNegative ? zero : excess;
   const bargainGain = excess.isNegative ? excess.negated() : zero;
-  const nciGoodwill = nciAtAcquisition.minus(
-    nci.share(netAssetsAcquired, options.rounding ?? "half-even"),
+  const nciGoodwill = nciAtAcquisition.minus(nciShareOfNetAssets);
+
+  const considerationIn = measured(
+    consideration,
+    options,
+    acquired,
+    `The consideration for ${entity.code}`,
+  );
+  const netAssetsAcquiredIn = measured(
+    netAssetsAcquired,
+    options,
+    acquired,
+    `The net assets acquired with ${entity.code}`,
+  );
+  const nciAtAcquisitionIn = measured(
+    nciAtAcquisition,
+    options,
+    acquired,
+    `The non-controlling interest in ${entity.code} at acquisition`,
+  );
+  const goodwillIn = measured(goodwill, options, acquired, `Goodwill on ${entity.code}`);
+  const bargainGainIn = measured(
+    bargainGain,
+    options,
+    acquired,
+    `The bargain purchase gain on ${entity.code}`,
+  );
+  const nciGoodwillIn = measured(
+    nciGoodwill,
+    options,
+    acquired,
+    `The outside stake's goodwill on ${entity.code}`,
   );
 
   return Object.freeze({
@@ -253,13 +364,21 @@ export function acquisitionOf(
     groupInterest: entity.effective,
     nonControllingInterest: nci,
     measurement,
-    consideration,
-    netAssetsAcquired,
+    functional,
+    presentation: options.presentation,
+    consideration: considerationIn.presentation,
+    considerationIn,
+    netAssetsAcquired: netAssetsAcquiredIn.presentation,
+    netAssetsAcquiredIn,
     netAssetsSupplied,
-    nciAtAcquisition,
-    goodwill,
-    bargainGain,
-    nciGoodwill,
+    nciAtAcquisition: nciAtAcquisitionIn.presentation,
+    nciAtAcquisitionIn,
+    goodwill: goodwillIn.presentation,
+    goodwillIn,
+    bargainGain: bargainGainIn.presentation,
+    bargainGainIn,
+    nciGoodwill: nciGoodwillIn.presentation,
+    nciGoodwillIn,
     investmentAccount: input.investmentAccount ?? GROUP_ACCOUNTS.investment,
   });
 }
@@ -296,32 +415,59 @@ export function acquisitions(
   );
 }
 
+/**
+ * The workings behind goodwill, as a reader would check them.
+ *
+ * Where the acquired company keeps its books in another currency the figures
+ * are shown in both: the subsidiary's currency, which is where the subtraction
+ * happened, and the group's beside it. Showing only the translated column
+ * would leave a reader adding up three sterling figures that do not quite make
+ * the fourth, because each of them is a rounding of something else.
+ */
 export function renderAcquisition(acquisition: Acquisition): string {
   const lines: string[] = [];
-  const label = (text: string, amount: Money): string =>
-    `  ${text.padEnd(44)}${amount.toDecimalString().padStart(14)}`;
+  const foreign = acquisition.functional.code !== acquisition.presentation.code;
+  const label = (text: string, amount: AcquiredAmount, negated = false): string => {
+    const take = (money: Money): string =>
+      (negated ? money.negated() : money).toDecimalString();
+    const presentation = take(amount.presentation).padStart(14);
+    if (!foreign) return `  ${text.padEnd(44)}${presentation}`;
+    return `  ${text.padEnd(44)}${take(amount.functional).padStart(14)}${presentation}`;
+  };
   lines.push(
     `${acquisition.entity} — acquired ${acquisition.acquired}, ` +
       `${acquisition.groupInterest.toPercentString(4)} to the group, ` +
       `non-controlling interest at ${acquisition.measurement}`,
   );
-  lines.push(label("Consideration transferred", acquisition.consideration));
-  lines.push(label("Non-controlling interest at acquisition", acquisition.nciAtAcquisition));
+  if (foreign) {
+    lines.push(
+      `  ${"".padEnd(44)}${acquisition.functional.code.padStart(14)}` +
+        `${acquisition.presentation.code.padStart(14)}`,
+    );
+  }
+  lines.push(label("Consideration transferred", acquisition.considerationIn));
+  lines.push(label("Non-controlling interest at acquisition", acquisition.nciAtAcquisitionIn));
   lines.push(
     label(
       `Net assets acquired${acquisition.netAssetsSupplied ? " (supplied)" : ""}`,
-      acquisition.netAssetsAcquired.negated(),
+      acquisition.netAssetsAcquiredIn,
+      true,
     ),
   );
   if (acquisition.bargainGain.isZero) {
-    lines.push(label("Goodwill", acquisition.goodwill));
+    lines.push(label("Goodwill", acquisition.goodwillIn));
     if (!acquisition.nciGoodwill.isZero) {
+      lines.push(label("  of which attributable to the outside stake", acquisition.nciGoodwillIn));
+    }
+    if (foreign) {
       lines.push(
-        label("  of which attributable to the outside stake", acquisition.nciGoodwill),
+        `  Measured in ${acquisition.functional.code} and translated at the rate on ` +
+          `${acquisition.acquired}: goodwill on a foreign operation is an asset of that ` +
+          `operation.`,
       );
     }
   } else {
-    lines.push(label("Gain on a bargain purchase", acquisition.bargainGain.negated()));
+    lines.push(label("Gain on a bargain purchase", acquisition.bargainGainIn, true));
     lines.push("  A price below the net assets acquired is a gain, not a negative asset.");
   }
   return lines.join("\n");
