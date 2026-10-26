@@ -1116,6 +1116,27 @@ Nord's was measured proportionately, so it owns none of the goodwill and none
 of the difference — which is a fact about the measurement and not about the
 size of the stake.
 
+Goodwill gets a schedule of its own for a sharper reason. Four things move it —
+arising on acquisition, written off, retranslated, derecognised on a disposal —
+and three of them are invisible in the difference between two columns. Any two
+can cancel: goodwill flat across a comparative can mean nothing happened, or it
+can mean a write-off and a favourable rate move of the same size, and those are
+not the same news. The suite has a fixture where they cancel to within a penny.
+
+```
+Goodwill
+  At the start of the period                 110945.60
+  HN — retranslated                           -1260.60
+  HS — retranslated                           -1506.50
+  At the reporting date                      108178.50
+```
+
+Each line is at the figure that thing moved the account by: a write-off at the
+rate it was recognised at, and the retranslation as whatever the closing rate
+did on top of that. Take the write-off at the closing rate instead and both
+lines are wrong while still adding to the right total — which is the kind of
+error a schedule is supposed to make visible rather than contain.
+
 That closing figure is what the consolidation reports, not what the lines add
 up to. Applying a fraction three times rounds three times where measuring
 directly rounds once, so the two can differ — and where they do, the difference
