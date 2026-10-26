@@ -66,7 +66,13 @@ import type { RateTable } from "../fx/table.js";
 import type { AverageMethod } from "../fx/average.js";
 import { type Aggregation, type AggregationOptions, type EntityLedgers, aggregate } from "./aggregate.js";
 import { CONSOLIDATION_ACCOUNTS, GROUP_ACCOUNTS } from "./accounts.js";
-import { type Acquisition, type AcquisitionInput, acquisitions } from "./acquisition.js";
+import {
+  type Acquisition,
+  type AcquisitionInput,
+  type GoodwillCarrying,
+  acquisitions,
+  goodwillAt,
+} from "./acquisition.js";
 import { type Disposal, type DisposalInput, disposals } from "./disposal.js";
 import {
   type EliminationOptions,
@@ -98,6 +104,13 @@ export interface SubsidiaryWorking {
   readonly nciClosing: Money;
   /** The group's share of reserves earned since control was obtained. */
   readonly postAcquisitionReserves: Money;
+  /**
+   * What goodwill on the entity is carried at on this date, and the exchange
+   * difference accumulated since acquisition. For an entity whose books are
+   * kept in the presentation currency the difference is nil and the carrying
+   * amount is the acquisition figure.
+   */
+  readonly goodwillCarrying: GoodwillCarrying;
 }
 
 /** A company that left the group, and what removing it did. */
@@ -398,7 +411,16 @@ export function consolidate(
     const profitForPeriod = sumRows(aggregation, entity.code, ["income", "expense"]).negated();
     const nci = entity.nonControlling;
     const nciProfitShare = nci.share(profitForPeriod, rounding);
-    const nciClosing = nci.share(netAssetsNow, rounding).plus(acquisition.nciGoodwill);
+    // Goodwill is an asset of the subsidiary and is carried at the closing
+    // rate like the rest of them. The outside stake's claim therefore includes
+    // its goodwill at the closing rate too, not at the rate on the day the
+    // company was bought.
+    const goodwillCarrying = goodwillAt(
+      acquisition,
+      { rates: options.rates, rounding },
+      aggregation.asAt,
+    );
+    const nciClosing = nci.share(netAssetsNow, rounding).plus(goodwillCarrying.nciCarrying);
 
     const postings: PostingInput[] = equityRows.map((row) => ({
       account: row.account,
@@ -406,11 +428,30 @@ export function consolidate(
       memo: `${entity.code} pre-acquisition and reserves, removed`,
     }));
     // Goodwill is an asset; a bargain purchase is a gain. One posting either way.
-    if (!acquisition.goodwill.isZero) {
+    if (!goodwillCarrying.carrying.isZero) {
       postings.push({
         account: GROUP_ACCOUNTS.goodwill,
-        amount: acquisition.goodwill,
+        amount: goodwillCarrying.carrying,
         memo: `on the acquisition of ${entity.code}`,
+      });
+    }
+    // The group's share of the exchange difference goes to the translation
+    // reserve. Without this posting the difference would fall into the
+    // balancing figure below and read as post-acquisition reserves the group
+    // never earned.
+    //
+    // The outside stake's share needs no posting of its own, and adding one
+    // double-counts it: `nciClosing` above is measured afresh at this date and
+    // already carries the stake's goodwill at the closing rate, so the only
+    // part of the difference that is still unaccounted for is the group's. The
+    // two together come to the whole difference, so the entry balances and the
+    // balancing figure is the same as it would have been with no retranslation
+    // at all.
+    if (!goodwillCarrying.groupExchangeDifference.isZero) {
+      postings.push({
+        account: GROUP_ACCOUNTS.translationReserve,
+        amount: goodwillCarrying.groupExchangeDifference.negated(),
+        memo: `goodwill on ${entity.code} retranslated from ${acquisition.functional.code}`,
       });
     }
     if (!acquisition.bargainGain.isZero) {
@@ -494,6 +535,7 @@ export function consolidate(
         nciProfitShare,
         nciClosing,
         postAcquisitionReserves: balancing.negated(),
+        goodwillCarrying,
       }),
     );
   }
