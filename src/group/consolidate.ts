@@ -70,6 +70,7 @@ import {
   type Acquisition,
   type AcquisitionInput,
   type GoodwillCarrying,
+  type GoodwillImpairment,
   acquisitions,
   goodwillAt,
 } from "./acquisition.js";
@@ -100,6 +101,15 @@ export interface SubsidiaryWorking {
   readonly profitForPeriod: Money;
   /** The outside stake's share of that result. */
   readonly nciProfitShare: Money;
+  /**
+   * What is actually allocated to the outside stake out of the period's
+   * result: its share of the subsidiary's own result, less its share of any
+   * goodwill written off. The impairment is a group-level charge that the
+   * subsidiary's books have never heard of, so its share of it cannot come out
+   * of `nciProfitShare`; and it has to come out of the result rather than out
+   * of reserves brought forward, because it is this period's loss.
+   */
+  readonly nciResultShare: Money;
   /** The outside stake's claim at the reporting date, goodwill included. */
   readonly nciClosing: Money;
   /** The group's share of reserves earned since control was obtained. */
@@ -188,6 +198,12 @@ export interface ConsolidationOptions {
   intragroupStock?: readonly IntragroupStockDeclaration[];
   acquisitions?: readonly AcquisitionInput[];
   disposals?: readonly DisposalInput[];
+  /**
+   * Goodwill the group has written off, cumulatively since acquisition.
+   * Declared rather than inferred: nothing in a subsidiary's own books says
+   * the price paid over its net assets has stopped being worth paying.
+   */
+  goodwillImpairments?: readonly GoodwillImpairment[];
   /** Where an entity's pre-acquisition result goes. Retained earnings by default. */
   reserves?: string;
   /**
@@ -349,7 +365,14 @@ export function consolidate(
     ledgers,
     (options.disposals ?? []).filter((input) => leftDuringPeriod.has(input.entity)),
     acquired,
-    { rates: options.rates, presentation, rounding, netAssetsAsConsolidated: netAssetsByEntity },
+    {
+      rates: options.rates,
+      presentation,
+      rounding,
+      netAssetsAsConsolidated: netAssetsByEntity,
+      goodwillImpairments: options.goodwillImpairments ?? [],
+      period: aggregation.period,
+    },
   );
 
   const entries: JournalEntry[] = [];
@@ -425,12 +448,25 @@ export function consolidate(
     const readAt =
       aggregation.entities.find((c) => c.entity === entity.code)?.control.consolidateAt ??
       aggregation.asAt;
+    const impairments = (options.goodwillImpairments ?? []).filter(
+      (declared) => declared.entity === entity.code,
+    );
     const goodwillCarrying = goodwillAt(
       acquisition,
-      { rates: options.rates, rounding },
+      {
+        rates: options.rates,
+        rounding,
+        impairments,
+        period: aggregation.period,
+      },
       readAt,
     );
     const nciClosing = nci.share(netAssetsNow, rounding).plus(goodwillCarrying.nciCarrying);
+    // `nciCarrying` is already net of the stake's share of any impairment, so
+    // its claim is right; what the allocation below has to do is take that
+    // share out of the result rather than let it fall into the balancing
+    // figure, where it would read as reserves the group earned.
+    const nciResultShare = nciProfitShare.minus(goodwillCarrying.nciImpairmentLoss);
 
     const postings: PostingInput[] = equityRows.map((row) => ({
       account: row.account,
@@ -464,6 +500,17 @@ export function consolidate(
         memo: `goodwill on ${entity.code} retranslated from ${acquisition.functional.code}`,
       });
     }
+    // What has been written off goes to the expense. The goodwill posting
+    // above is already net of it, so this is the other side of the same
+    // reduction and the pair leaves the entry's balancing figure alone — the
+    // write-off belongs in the result, not in the reserves brought forward.
+    if (!goodwillCarrying.impairmentLoss.isZero) {
+      postings.push({
+        account: GROUP_ACCOUNTS.goodwillImpairment,
+        amount: goodwillCarrying.impairmentLoss,
+        memo: `written off the goodwill on ${entity.code}`,
+      });
+    }
     if (!acquisition.bargainGain.isZero) {
       postings.push({
         account: GROUP_ACCOUNTS.bargainGain,
@@ -478,7 +525,7 @@ export function consolidate(
         memo: `investment in ${entity.code}, eliminated`,
       });
     }
-    const nciBroughtIn = nciClosing.minus(nciProfitShare);
+    const nciBroughtIn = nciClosing.minus(nciResultShare);
     if (!nciBroughtIn.isZero) {
       postings.push({
         account: GROUP_ACCOUNTS.nonControllingInterest,
@@ -509,7 +556,7 @@ export function consolidate(
       ),
     );
 
-    if (!nciProfitShare.isZero) {
+    if (!nciResultShare.isZero) {
       entries.push(
         JournalEntry.create(
           {
@@ -519,12 +566,15 @@ export function consolidate(
             postings: [
               {
                 account: GROUP_ACCOUNTS.nciProfitShare,
-                amount: nciProfitShare,
-                memo: "out of the result attributable to the parent's owners",
+                amount: nciResultShare,
+                memo: goodwillCarrying.nciImpairmentLoss.isZero
+                  ? "out of the result attributable to the parent's owners"
+                  : `out of the result attributable to the parent's owners, after ` +
+                    `${goodwillCarrying.nciImpairmentLoss} of goodwill written off`,
               },
               {
                 account: GROUP_ACCOUNTS.nonControllingInterest,
-                amount: nciProfitShare.negated(),
+                amount: nciResultShare.negated(),
                 memo: "and into the outside stake",
               },
             ],
@@ -543,6 +593,7 @@ export function consolidate(
         netAssetsNow,
         profitForPeriod,
         nciProfitShare,
+        nciResultShare,
         nciClosing,
         postAcquisitionReserves: balancing.negated(),
         goodwillCarrying,
@@ -740,11 +791,43 @@ export function renderConsolidation(result: Consolidation): string {
     // group does not own.
     const readAt = contribution?.readAt;
     const gone = control?.disposedDuring === true;
-    lines.push(label("Goodwill", working.acquisition.goodwill));
+    const carrying = working.goodwillCarrying;
+    if (carrying.impairedFunctional.isZero) {
+      lines.push(label("Goodwill", carrying.carrying));
+    } else {
+      // Three lines rather than one, and the column adds up down them: cost at
+      // the rate it was recognised at, less what has been written off at the
+      // rates those write-offs were recognised at, plus what the closing rate
+      // has done to what is left. A reader who cannot add the column has to
+      // take the last figure on trust — which is why this period's share of
+      // the write-off goes in the label rather than into a fourth figure that
+      // is part of the third.
+      lines.push(label("Goodwill at cost", carrying.atAcquisition.plus(carrying.recognisedToDate)));
+      lines.push(
+        label(
+          carrying.impairmentLoss.isZero
+            ? "  written off to date"
+            : `  written off to date (${carrying.impairmentLoss.toDecimalString()} this period)`,
+          carrying.recognisedToDate.negated(),
+        ),
+      );
+      if (!carrying.exchangeDifference.isZero) {
+        lines.push(label("  retranslated at the closing rate", carrying.exchangeDifference));
+      }
+      lines.push(label("Goodwill", carrying.carrying));
+    }
     lines.push(label(gone ? `Net assets at ${readAt}` : "Net assets now", working.netAssetsNow));
     lines.push(label("Result for the period", working.profitForPeriod));
     if (!working.acquisition.nonControllingInterest.isZero) {
-      lines.push(label("Outside stake's share of the result", working.nciProfitShare));
+      if (carrying.nciImpairmentLoss.isZero) {
+        lines.push(label("Outside stake's share of the result", working.nciResultShare));
+      } else {
+        lines.push(label("Outside stake's share of the result", working.nciProfitShare));
+        lines.push(
+          label("  less its share of the goodwill written off", carrying.nciImpairmentLoss.negated()),
+        );
+        lines.push(label("  allocated to the outside stake", working.nciResultShare));
+      }
       lines.push(
         label(
           gone ? `Outside stake at ${readAt}` : "Outside stake at the reporting date",

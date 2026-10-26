@@ -933,6 +933,52 @@ derecognises goodwill at that same figure, so the gain is measured against a
 carrying amount the balance sheet actually showed, and nothing is left in the
 goodwill account for a company that is no longer in the group.
 
+**Writing it down, and the basis that catches people out.** An impairment is a
+judgement the group makes about the business it bought, so it is declared — as
+an *event with a date*, not a running total. The date is needed because a loss
+takes the rate on the day it was recognised, and the events are needed because
+a reporting date has to tell what has been written off by then from what was
+written off during the period. A cumulative total cannot tell those apart, and a
+comparative column would charge the whole history to the later year and print a
+plausible number.
+
+The write-off comes off the measurement before any rate touches it. The exchange
+difference is then taken against cost less everything already through the income
+statement, at the rates those write-offs took — so a write-off recognised at the
+closing rate leaves the difference exactly as it would have been with none,
+because the asset and the figure it is measured against shrink by the same
+amount.
+
+Its share of the charge is the outside stake's **ownership** fraction, where its
+share of the exchange difference was its share of the **goodwill**. The two look
+alike and are not. A remeasurement of an asset follows whoever owns the asset;
+a loss of the period is shared the way every other result is. On the
+cross-border fixture the stake holds 20% of the company and 5.45% of the
+goodwill, so the ownership basis gives it nearly four times the loss the
+goodwill basis would. Under the proportionate method the balance sheet carries
+only the group's own goodwill, so the only write-down recognisable against it is
+the group's — however much of the company the stake holds.
+
+That share comes out of the result rather than out of reserves brought forward,
+because it is this period's loss: the balancing figure is untouched by a
+write-off recognised in the period, and reduced by the group's share of one
+recognised earlier, which is exactly where a prior year's loss belongs.
+
+```
+S — Sub GmbH, 80% to the group
+  Goodwill at cost                                        44000.00
+    written off to date (5100.00 this period)             -8300.00
+    retranslated at the closing rate                       4800.00
+  Goodwill                                                40500.00
+  ...
+  Outside stake's share of the result                      1687.45
+    less its share of the goodwill written off            -1020.00
+    allocated to the outside stake                          667.45
+```
+
+Both columns add down. A reader who cannot add a column has to take its last
+figure on trust, which is the opposite of the point.
+
 A price *below* the net assets acquired is a bargain purchase and shows up as a
 gain in the income statement. Negative goodwill sitting in the balance sheet
 would be asserting that the group owns something worth less than nothing.

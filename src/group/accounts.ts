@@ -22,6 +22,12 @@
  * expenses, the same way a bargain purchase is a gain and not negative
  * goodwill.
  *
+ * Impairment of goodwill is a group line because goodwill is: nothing in the
+ * subsidiary's own books says the price the group paid over its net assets has
+ * stopped being worth paying. It is an expense rather than a reduction of the
+ * asset shown net, because a reader who wants to know what the group wrote off
+ * this year should not have to difference two balance sheets to find out.
+ *
  * Unrealised profit on intragroup stock is a group line for a subtler reason:
  * nothing is wrong in either company's books. The seller earned its margin and
  * recorded it; the buyer paid the price and carries the goods at it. It is only
@@ -59,6 +65,7 @@ export const GROUP_ACCOUNTS = {
   disposalGain: "4970",
   disposalLoss: "5970",
   unrealisedProfit: "5965",
+  goodwillImpairment: "5975",
 } as const;
 
 export const CONSOLIDATION_ACCOUNTS: readonly AccountDefinition[] = [
@@ -143,6 +150,13 @@ export const CONSOLIDATION_ACCOUNTS: readonly AccountDefinition[] = [
     type: "income",
     parent: "4000",
     description: "Net assets acquired above what was paid for them",
+  },
+  {
+    code: GROUP_ACCOUNTS.goodwillImpairment,
+    name: "Impairment of Goodwill",
+    type: "expense",
+    parent: "5000",
+    description: "What the group has written off the price it paid over the net assets",
   },
   {
     code: GROUP_ACCOUNTS.disposalGain,

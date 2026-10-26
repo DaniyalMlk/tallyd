@@ -66,7 +66,12 @@
 import { Money } from "../money/money.js";
 import type { Currency } from "../money/currency.js";
 import type { RoundingMode } from "../money/rounding.js";
-import { type CalendarDate, date as parseDate } from "../ledger/date.js";
+import {
+  type CalendarDate,
+  type DateRange,
+  compareDates,
+  date as parseDate,
+} from "../ledger/date.js";
 import type { Ledger } from "../ledger/ledger.js";
 import { trialBalance } from "../ledger/trialBalance.js";
 import type { ExchangeRate } from "../fx/rate.js";
@@ -405,19 +410,69 @@ export function acquisitionOf(
  * The bargain purchase gain is not here. A gain is recognised once, in the
  * income statement of the period control was obtained, at the rate then; it is
  * part of reserves afterwards and not an asset sitting there to be remeasured.
+ *
+ * ## Impairment, and why it splits on a different basis
+ *
+ * An impairment reduces the measurement. It is a judgement about the business
+ * the group bought, so it is a figure in that business's currency and it is
+ * applied before any rate is: what is retranslated afterwards is what is left.
+ *
+ * Its share of it is the outside stake's *ownership* fraction, where its share
+ * of the exchange difference was its share of the goodwill. The two look alike
+ * and are not, because they are different kinds of thing. An exchange
+ * difference is a remeasurement of an asset, so it follows whoever owns the
+ * asset — and under the proportionate method the stake owns none of the
+ * goodwill, so none of the difference is its, whatever fraction of the company
+ * it holds. An impairment is a loss of the period, and a loss of the period is
+ * shared the way every other result is: in the ratio of the interests. Using
+ * one basis for both is plausible, and wrong in whichever direction it is done.
+ *
+ * Where the stake was measured proportionately there is nothing to share. The
+ * balance sheet carries only the group's own goodwill, so the only impairment
+ * that can be recognised against it is the group's; the stake's notional share
+ * of a loss on goodwill it never had is not a figure the accounts contain.
  */
 export interface GoodwillCarrying {
   readonly entity: string;
   readonly on: CalendarDate;
-  /** The measurement, which does not change: goodwill in the entity's currency. */
+  /**
+   * The measurement net of impairment, in the entity's currency. Equal to the
+   * acquisition measurement where nothing has been written down.
+   */
   readonly functional: Money;
+  /** The measurement before impairment, which never changes. */
+  readonly grossFunctional: Money;
+  /** What has been written off it, in the entity's currency. */
+  readonly impairedFunctional: Money;
   /** That amount at the closing rate on `on`. */
   readonly carrying: Money;
-  /** The same amount at the acquisition-date rate, for comparison. */
+  /**
+   * What the asset was first recognised at, less what has been impaired at the
+   * rate the impairment was recognised at. The figure the exchange difference
+   * is measured against: anything beyond this is the rate moving.
+   */
   readonly atAcquisition: Money;
   /** `carrying` less `atAcquisition`: the exchange difference accumulated since. */
   readonly exchangeDifference: Money;
-  /** The outside stake's goodwill in the entity's currency. */
+/**
+   * The write-offs falling inside the reporting period, as the income
+   * statement carries them: each at the rate on the day it was recognised.
+   * Earlier write-offs are not here — they reduced the asset in a period that
+   * has already been reported.
+   */
+  readonly impairmentLoss: Money;
+  /** The outside stake's share of that charge, by its ownership fraction. */
+  readonly nciImpairmentLoss: Money;
+  /** The rest of it, which is the group's. */
+  readonly groupImpairmentLoss: Money;
+  /** This period's charge in the entity's own currency. */
+  readonly chargedFunctional: Money;
+  /**
+   * Everything written off over the asset's life, each at the rate on its own
+   * day. The figure the exchange difference is measured against.
+   */
+  readonly recognisedToDate: Money;
+  /** The outside stake's goodwill in the entity's currency, net of its share. */
   readonly nciFunctional: Money;
   /** That amount at the closing rate. */
   readonly nciCarrying: Money;
@@ -430,9 +485,47 @@ export interface GoodwillCarrying {
   readonly rate: ExchangeRate | null;
 }
 
+/**
+ * One write-off of goodwill, on the day the group decided it.
+ *
+ * Nothing in anybody's books says goodwill is worth less than it was: an
+ * impairment is a judgement the group makes about the business it bought, so
+ * it is declared rather than inferred.
+ *
+ * It is declared as an event with a date rather than as a running total, and
+ * the date is required. Two reasons, and the second is the one that forced it.
+ * A loss is translated at the rate on the day it was recognised, so a total
+ * with no date has no rate. And a consolidation has to be a function of its
+ * inputs: given a list of events, any reporting date can work out both what
+ * has been written off by then and what was written off *during the period*,
+ * which are different figures and belong in different places. A cumulative
+ * total cannot tell those apart, so a comparative column would charge the
+ * whole history to the later year and the figure would look plausible.
+ */
+export interface GoodwillImpairment {
+  entity: string;
+  /** What was written off on that day, in any currency. */
+  amount: Money;
+  /** The day the group recognised it. */
+  on: string;
+}
+
 export interface GoodwillCarryingOptions {
   rates: RateTable;
   rounding?: RoundingMode;
+  /**
+   * Every write-off the group has declared, in any order. Events dated after
+   * the date being carried at are ignored, which is what makes one list serve
+   * a comparative column as well as the current one.
+   */
+  impairments?: readonly GoodwillImpairment[];
+  /**
+   * The reporting period. Events inside it are this period's charge and reach
+   * the income statement; earlier ones are accumulated and only reduce the
+   * asset. Without it every event on or before the carrying date counts as
+   * this period's, which is right for a first period and wrong afterwards.
+   */
+  period?: DateRange;
 }
 
 export function goodwillAt(
@@ -441,40 +534,162 @@ export function goodwillAt(
   on: CalendarDate,
 ): GoodwillCarrying {
   const rounding = options.rounding ?? "half-even";
-  const functional = acquisition.goodwillIn.functional;
-  const nciFunctional = acquisition.nciGoodwillIn.functional;
+  const grossFunctional = acquisition.goodwillIn.functional;
+  const grossNciFunctional = acquisition.nciGoodwillIn.functional;
   const sameCurrency = acquisition.functional.code === acquisition.presentation.code;
+  const zeroFunctional = Money.zero(acquisition.functional);
 
-  let rate: ExchangeRate | null = null;
-  let carrying = acquisition.goodwill;
-  let nciCarrying = acquisition.nciGoodwill;
-  if (!sameCurrency) {
+  const closingRate = (when: CalendarDate, what: string): ExchangeRate => {
     try {
-      rate = options.rates.lookup(acquisition.functional, acquisition.presentation, on).rate;
+      return options.rates.lookup(acquisition.functional, acquisition.presentation, when).rate;
     } catch (error) {
       throw new GroupError(
-        `Goodwill on ${acquisition.entity} is ${acquisition.functional.code} and has to be ` +
-          `carried at the ${acquisition.presentation.code} closing rate, but there is no rate ` +
-          `on ${on}: ${(error as Error).message}`,
+        `${what} on ${acquisition.entity} is ${acquisition.functional.code} and has to be ` +
+          `stated in ${acquisition.presentation.code}, but there is no rate ` +
+          `on ${when}: ${(error as Error).message}`,
       );
     }
+  };
+
+  // The impairment comes off the measurement before any rate touches it: what
+  // is retranslated is what is left. Events after the carrying date are not
+  // yet news, and events inside the reporting period are this period's charge
+  // as well as part of the accumulated total.
+  const events = [...(options.impairments ?? [])]
+    .map((declared) => {
+      if (declared.entity !== acquisition.entity) {
+        throw new GroupError(
+          `An impairment of goodwill on ${declared.entity} was given to ${acquisition.entity}`,
+        );
+      }
+      const when = parseDate(declared.on);
+      if (compareDates(when, acquisition.acquired) < 0) {
+        throw new GroupError(
+          `Goodwill on ${acquisition.entity} is written off on ${when}, before it arose on ` +
+            `${acquisition.acquired}. There was nothing there to write off.`,
+        );
+      }
+      const amount = convertOn(
+        declared.amount,
+        acquisition.functional,
+        {
+          rates: options.rates,
+          presentation: acquisition.presentation,
+          ...(options.rounding === undefined ? {} : { rounding: options.rounding }),
+        },
+        when,
+        `The impairment of goodwill on ${acquisition.entity}`,
+      );
+      if (amount.isNegative) {
+        throw new GroupError(
+          `Goodwill on ${acquisition.entity} is written back up by ${amount.negated()} on ` +
+            `${when}. An impairment once recognised stays recognised.`,
+        );
+      }
+      return { when, amount };
+    })
+    .filter((event) => compareDates(event.when, on) <= 0)
+    .sort((a, b) => compareDates(a.when, b.when));
+
+  const inPeriod = (when: CalendarDate): boolean =>
+    options.period === undefined ||
+    (compareDates(when, options.period.from) >= 0 && compareDates(when, options.period.to) <= 0);
+
+  let impairedFunctional = zeroFunctional;
+  let chargedFunctional = zeroFunctional;
+  let nciImpairedFunctional = zeroFunctional;
+  let nciChargedFunctional = zeroFunctional;
+  // Each event's loss takes the rate on its own day, so the sum of them is
+  // what the income statement has carried over the asset's life and the
+  // residual against the closing rate is the rate's doing and nothing else.
+  let recognisedAtTheTime = Money.zero(acquisition.presentation);
+  let nciRecognisedAtTheTime = Money.zero(acquisition.presentation);
+  let chargeLoss = Money.zero(acquisition.presentation);
+  let nciChargeLoss = Money.zero(acquisition.presentation);
+
+  for (const event of events) {
+    // The stake bears its ownership fraction of the loss, not its share of the
+    // goodwill: a loss of the period is shared the way every result is. Where
+    // the stake was measured proportionately it has no goodwill on the balance
+    // sheet and so no recognised share of a write-down of it.
+    const nciAmount =
+      acquisition.measurement === "fair-value"
+        ? acquisition.nonControllingInterest.share(event.amount, rounding)
+        : zeroFunctional;
+    impairedFunctional = impairedFunctional.plus(event.amount);
+    nciImpairedFunctional = nciImpairedFunctional.plus(nciAmount);
+    if (impairedFunctional.greaterThan(grossFunctional)) {
+      throw new GroupError(
+        `${impairedFunctional} of goodwill is written off ${acquisition.entity} by ${event.when}, ` +
+          `which only has ${grossFunctional}. Goodwill carried at a negative amount is not a ` +
+          `smaller error than the one being corrected.`,
+      );
+    }
+    if (nciImpairedFunctional.greaterThan(grossNciFunctional)) {
+      throw new GroupError(
+        `The outside stake's share of the impairments on ${acquisition.entity} reaches ` +
+          `${nciImpairedFunctional} by ${event.when}, more than the ${grossNciFunctional} of ` +
+          `goodwill attributed to it. Writing its claim below what it was given would charge ` +
+          `it for goodwill it never had.`,
+      );
+    }
+    const eventRate = sameCurrency ? null : closingRate(event.when, "The impairment of goodwill");
+    const atTheTime = eventRate === null ? event.amount : eventRate.convert(event.amount, rounding);
+    const nciAtTheTime = eventRate === null ? nciAmount : eventRate.convert(nciAmount, rounding);
+    recognisedAtTheTime = recognisedAtTheTime.plus(atTheTime);
+    nciRecognisedAtTheTime = nciRecognisedAtTheTime.plus(nciAtTheTime);
+    if (inPeriod(event.when)) {
+      chargedFunctional = chargedFunctional.plus(event.amount);
+      nciChargedFunctional = nciChargedFunctional.plus(nciAmount);
+      chargeLoss = chargeLoss.plus(atTheTime);
+      nciChargeLoss = nciChargeLoss.plus(nciAtTheTime);
+    }
+  }
+  void nciChargedFunctional;
+
+  const functional = grossFunctional.minus(impairedFunctional);
+  const nciFunctional = grossNciFunctional.minus(nciImpairedFunctional);
+
+  let rate: ExchangeRate | null = null;
+  let carrying = functional;
+  let nciCarrying = nciFunctional;
+  if (!sameCurrency) {
+    rate = closingRate(on, "Goodwill");
     carrying = rate.convert(functional, rounding);
     nciCarrying = rate.convert(nciFunctional, rounding);
   }
 
-  const exchangeDifference = carrying.minus(acquisition.goodwill);
-  const nciExchangeDifference = nciCarrying.minus(acquisition.nciGoodwill);
+  // What the asset was recognised at, less everything taken out of it through
+  // the income statement over its life, each write-off at the rate on its own
+  // day. Whatever is left between that and the closing-rate carrying amount is
+  // the rate's doing and nothing else, which is what sends it to the reserve.
+  //
+  // It falls out of this that a write-off recognised at the closing rate leaves
+  // the exchange difference exactly as it would have been with no write-off at
+  // all: the asset is smaller and so is the figure it is measured against, by
+  // the same amount. That is the test that says the two effects are apart.
+  const atAcquisition = acquisition.goodwill.minus(recognisedAtTheTime);
+  const nciAtAcquisition = acquisition.nciGoodwill.minus(nciRecognisedAtTheTime);
+  const exchangeDifference = carrying.minus(atAcquisition);
+  const nciExchangeDifference = nciCarrying.minus(nciAtAcquisition);
 
   return Object.freeze({
     entity: acquisition.entity,
     on,
     functional,
+    grossFunctional,
+    impairedFunctional,
     carrying,
-    atAcquisition: acquisition.goodwill,
+    atAcquisition,
     exchangeDifference,
+    impairmentLoss: chargeLoss,
+    nciImpairmentLoss: nciChargeLoss,
+    groupImpairmentLoss: chargeLoss.minus(nciChargeLoss),
+    recognisedToDate: recognisedAtTheTime,
+    chargedFunctional,
     nciFunctional,
     nciCarrying,
-    nciAtAcquisition: acquisition.nciGoodwill,
+    nciAtAcquisition,
     nciExchangeDifference,
     groupExchangeDifference: exchangeDifference.minus(nciExchangeDifference),
     rate,
