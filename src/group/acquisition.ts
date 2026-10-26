@@ -69,6 +69,7 @@ import type { RoundingMode } from "../money/rounding.js";
 import { type CalendarDate, date as parseDate } from "../ledger/date.js";
 import type { Ledger } from "../ledger/ledger.js";
 import { trialBalance } from "../ledger/trialBalance.js";
+import type { ExchangeRate } from "../fx/rate.js";
 import type { RateTable } from "../fx/table.js";
 import { Interest } from "./interest.js";
 import { GroupError, type GroupStructure } from "./structure.js";
@@ -380,6 +381,103 @@ export function acquisitionOf(
     nciGoodwill: nciGoodwillIn.presentation,
     nciGoodwillIn,
     investmentAccount: input.investmentAccount ?? GROUP_ACCOUNTS.investment,
+  });
+}
+
+/**
+ * What goodwill on a foreign operation is carried at on a later date.
+ *
+ * Goodwill is an asset of the acquired company, so it is retranslated at every
+ * reporting date like any other asset of that company: at the closing rate,
+ * with the difference going to the translation reserve rather than through the
+ * income statement. Holding it at the acquisition-date rate instead would be
+ * carrying one asset of the subsidiary at a rate from years ago while every
+ * other asset of the same subsidiary moved.
+ *
+ * The difference does not all belong to the group. The outside stake owns
+ * whatever goodwill was attributed to it when the company was bought, so it
+ * owns the exchange difference on that part too — and *only* on that part. The
+ * split is therefore decided by how the stake was measured and not by how
+ * large it is: under the proportionate method the stake has no goodwill at
+ * all, so none of the exchange difference is its, however much of the company
+ * it owns.
+ *
+ * The bargain purchase gain is not here. A gain is recognised once, in the
+ * income statement of the period control was obtained, at the rate then; it is
+ * part of reserves afterwards and not an asset sitting there to be remeasured.
+ */
+export interface GoodwillCarrying {
+  readonly entity: string;
+  readonly on: CalendarDate;
+  /** The measurement, which does not change: goodwill in the entity's currency. */
+  readonly functional: Money;
+  /** That amount at the closing rate on `on`. */
+  readonly carrying: Money;
+  /** The same amount at the acquisition-date rate, for comparison. */
+  readonly atAcquisition: Money;
+  /** `carrying` less `atAcquisition`: the exchange difference accumulated since. */
+  readonly exchangeDifference: Money;
+  /** The outside stake's goodwill in the entity's currency. */
+  readonly nciFunctional: Money;
+  /** That amount at the closing rate. */
+  readonly nciCarrying: Money;
+  readonly nciAtAcquisition: Money;
+  /** The exchange difference on the outside stake's goodwill, which is its own. */
+  readonly nciExchangeDifference: Money;
+  /** The rest of it, which is the group's and belongs in the translation reserve. */
+  readonly groupExchangeDifference: Money;
+  /** The rate used. Null where no translation was needed. */
+  readonly rate: ExchangeRate | null;
+}
+
+export interface GoodwillCarryingOptions {
+  rates: RateTable;
+  rounding?: RoundingMode;
+}
+
+export function goodwillAt(
+  acquisition: Acquisition,
+  options: GoodwillCarryingOptions,
+  on: CalendarDate,
+): GoodwillCarrying {
+  const rounding = options.rounding ?? "half-even";
+  const functional = acquisition.goodwillIn.functional;
+  const nciFunctional = acquisition.nciGoodwillIn.functional;
+  const sameCurrency = acquisition.functional.code === acquisition.presentation.code;
+
+  let rate: ExchangeRate | null = null;
+  let carrying = acquisition.goodwill;
+  let nciCarrying = acquisition.nciGoodwill;
+  if (!sameCurrency) {
+    try {
+      rate = options.rates.lookup(acquisition.functional, acquisition.presentation, on).rate;
+    } catch (error) {
+      throw new GroupError(
+        `Goodwill on ${acquisition.entity} is ${acquisition.functional.code} and has to be ` +
+          `carried at the ${acquisition.presentation.code} closing rate, but there is no rate ` +
+          `on ${on}: ${(error as Error).message}`,
+      );
+    }
+    carrying = rate.convert(functional, rounding);
+    nciCarrying = rate.convert(nciFunctional, rounding);
+  }
+
+  const exchangeDifference = carrying.minus(acquisition.goodwill);
+  const nciExchangeDifference = nciCarrying.minus(acquisition.nciGoodwill);
+
+  return Object.freeze({
+    entity: acquisition.entity,
+    on,
+    functional,
+    carrying,
+    atAcquisition: acquisition.goodwill,
+    exchangeDifference,
+    nciFunctional,
+    nciCarrying,
+    nciAtAcquisition: acquisition.nciGoodwill,
+    nciExchangeDifference,
+    groupExchangeDifference: exchangeDifference.minus(nciExchangeDifference),
+    rate,
   });
 }
 

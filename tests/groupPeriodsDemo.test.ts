@@ -22,14 +22,14 @@ describe("the worked group over two periods", () => {
   });
 
   it("reaches the outside stake two different ways and gets the same figure", () => {
-    expect(compared.nci.closing.toDecimalString()).toBe("174052.58");
-    expect(compared.nci.rolledForward.toDecimalString()).toBe("174052.58");
+    expect(compared.nci.closing.toDecimalString()).toBe("173748.58");
+    expect(compared.nci.rolledForward.toDecimalString()).toBe("173748.58");
     expect(compared.nci.unexplained.isZero).toBe(true);
     const perEntity = compared.nciByEntity.reduce(
       (running, movement) => running.plus(movement.closing),
       Money.zero(GBP),
     );
-    expect(perEntity.toDecimalString()).toBe("174052.58");
+    expect(perEntity.toDecimalString()).toBe("173748.58");
   });
 
   it("splits that stake the way the two holdings say it splits", () => {
@@ -39,14 +39,46 @@ describe("the worked group over two periods", () => {
     // 60% the group reaches through Nord's 75%.
     expect(nord?.opening.toDecimalString()).toBe("71100.00");
     expect(nord?.closing.toDecimalString()).toBe("71448.58");
-    expect(systems?.opening.toDecimalString()).toBe("81764.00");
-    expect(systems?.closing.toDecimalString()).toBe("102604.00");
+    expect(systems?.opening.toDecimalString()).toBe("81620.00");
+    expect(systems?.closing.toDecimalString()).toBe("102300.00");
+  });
+
+  it("gives the Systems stake its own goodwill and Nord's stake none", () => {
+    const nord = compared.nciByEntity.find((m) => m.entity === "HN");
+    const systems = compared.nciByEntity.find((m) => m.entity === "HS");
+    // Systems' outside stake was measured at fair value, so it owns a slice of
+    // the goodwill and therefore the exchange difference on that slice. Nord's
+    // was measured proportionately, so it owns none of the goodwill and none
+    // of the difference — and that is about the measurement, not the size of
+    // the stake: Nord's 20% and Systems' 40% are the same kind of thing.
+    expect(nord?.goodwillRetranslation.isZero).toBe(true);
+    expect(systems?.goodwillRetranslation.toDecimalString()).toBe("-160.00");
+    expect(nord?.unexplained.isZero).toBe(true);
+    expect(systems?.unexplained.isZero).toBe(true);
   });
 
   it("reaches the translation reserve two different ways too", () => {
-    expect(compared.translationReserve.closing.toDecimalString()).toBe("-22164.01");
-    expect(compared.translationReserve.rolledForward.toDecimalString()).toBe("-22164.01");
+    expect(compared.translationReserve.closing.toDecimalString()).toBe("-27117.51");
+    expect(compared.translationReserve.rolledForward.toDecimalString()).toBe("-27117.51");
     expect(compared.translationReserve.unexplained.isZero).toBe(true);
+  });
+
+  it("names goodwill's share of the reserve rather than leaving it unexplained", () => {
+    // Four lines, not two: each subsidiary's own translation adjustment moved,
+    // and so did the sterling amount its goodwill is carried at. The second of
+    // those is in no entity's books, so without a line of its own it would sit
+    // under "not explained by the above".
+    const labels = compared.translationReserve.lines.map((l) => l.label);
+    expect(labels).toEqual([
+      "HN — movement on retranslation",
+      "HS — movement on retranslation",
+      "HN — goodwill retranslated",
+      "HS — goodwill retranslated",
+    ]);
+    const goodwillLines = compared.translationReserve.lines
+      .filter((l) => l.label.includes("goodwill"))
+      .reduce((running, l) => running.plus(l.amount), Money.zero(GBP));
+    expect(goodwillLines.toDecimalString()).toBe("-2607.10");
   });
 
   it("keeps the identity for every entity", () => {
@@ -67,10 +99,23 @@ describe("the worked group over two periods", () => {
     expect(nord?.translationEffect.toDecimalString()).toBe("-5400.00");
   });
 
-  it("shows goodwill unchanged, because nothing here impairs it", () => {
+  it("moves goodwill by the rate, because nothing here impairs it", () => {
+    // Both subsidiaries keep their books abroad, so goodwill on each is an
+    // asset of a foreign operation and moves with its closing rate. Nothing
+    // impaired it, and that claim now lives where it belongs: on the
+    // measurement, which is the same figure at both dates.
     const goodwill = compared.rows.find((r) => r.account === "1290");
-    expect(goodwill?.movement.isZero).toBe(true);
-    expect(goodwill?.current.toDecimalString()).toBe("113436.00");
+    expect(goodwill?.prior.toDecimalString()).toBe("110945.60");
+    expect(goodwill?.current.toDecimalString()).toBe("108178.50");
+    expect(goodwill?.movement.toDecimalString()).toBe("-2767.10");
+
+    const measured = compared.current.workings.map((w) =>
+      w.goodwillCarrying.functional.toString(),
+    );
+    expect(measured).toEqual(["63030.30 EUR", "75324.87 USD"]);
+    expect(measured).toEqual(
+      compared.prior.workings.map((w) => w.goodwillCarrying.functional.toString()),
+    );
   });
 });
 

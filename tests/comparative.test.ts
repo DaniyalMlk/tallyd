@@ -69,10 +69,31 @@ describe("the comparative trial balance", () => {
     expect(row("5960")).toBeUndefined();
   });
 
-  it("carries goodwill unchanged, because nothing impaired it", () => {
-    expect(row("1290")?.current.toDecimalString()).toBe("113436.00");
-    expect(row("1290")?.prior.toDecimalString()).toBe("113436.00");
-    expect(row("1290")?.movement.isZero).toBe(true);
+  it("moves goodwill by the rate and by nothing else", () => {
+    // "Nothing impaired it" used to be the same statement as "it did not
+    // move". It is not, for a subsidiary kept in another currency: goodwill is
+    // an asset of that subsidiary and is retranslated at each closing rate
+    // along with the rest of its assets. So the claim becomes that the
+    // movement is the rate and only the rate.
+    expect(row("1290")?.prior.toDecimalString()).toBe("110945.60");
+    expect(row("1290")?.current.toDecimalString()).toBe("108178.50");
+    expect(row("1290")?.movement.toDecimalString()).toBe("-2767.10");
+
+    // The measurement in each subsidiary's own currency is the same figure in
+    // both columns, which is what "nothing impaired it" actually asserts.
+    const measured = (c: typeof result.current): readonly string[] =>
+      c.workings.map((w) => w.goodwillCarrying.functional.toString());
+    expect(measured(result.current).length).toBeGreaterThan(0);
+    expect(measured(result.current)).toEqual(measured(result.prior));
+
+    // And the account's movement is the sum of the per-entity carrying
+    // amounts moving, not a residual of the page.
+    const carrying = (c: typeof result.current): number =>
+      c.workings.reduce(
+        (running, w) => running + Number(w.goodwillCarrying.carrying.toDecimalString()),
+        0,
+      );
+    expect(carrying(result.current) - carrying(result.prior)).toBeCloseTo(-2767.1, 2);
   });
 
   it("computes each movement as this period less last", () => {
@@ -273,7 +294,22 @@ describe("the rate table for the comparative period", () => {
       },
     });
     expect(result.sound).toBe(true);
-    expect(result.prior.translationReserve.toDecimalString()).toBe("-10750.00");
+    expect(result.prior.translationReserve.toDecimalString()).toBe("-13096.40");
+
+    // Of which 2,346.40 is goodwill retranslated rather than any entity's own
+    // adjustment, so the figure above is not a bare constant: it is the two
+    // components and nothing else.
+    const goodwill = result.prior.workings.reduce(
+      (running, w) => running.plus(w.goodwillCarrying.groupExchangeDifference),
+      Money.zero(GBP),
+    );
+    expect(goodwill.toDecimalString()).toBe("-2346.40");
+    expect(
+      result.prior.translationReserve
+        .plus(result.prior.aggregation.translationAdjustment)
+        .minus(goodwill)
+        .isZero,
+    ).toBe(true);
   });
 
   it("carries the money type through every column", () => {

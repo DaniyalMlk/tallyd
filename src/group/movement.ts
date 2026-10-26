@@ -118,6 +118,13 @@ export interface NciMovement {
   readonly shareOfTranslation: Money;
   readonly shareOfResult: Money;
   readonly shareOfOther: Money;
+  /**
+   * The stake's own goodwill, retranslated at this date's closing rate. Not a
+   * share of anything: the stake owns whatever goodwill was attributed to it
+   * at acquisition and nothing else, so this is nil under the proportionate
+   * method however large the stake is.
+   */
+  readonly goodwillRetranslation: Money;
   readonly arisingOnAcquisition: Money;
   readonly closing: Money;
   readonly unexplained: Money;
@@ -262,8 +269,12 @@ export function nciMovements(
       const closing = currentWorking?.nciClosing ?? zero;
 
       if (!movement.comparable) {
-        // Acquired in the period. Nothing was there to move.
-        const nciGoodwill = currentWorking?.acquisition.nciGoodwill ?? zero;
+        // Acquired in the period. Nothing was there to move, but the stake's
+        // goodwill is already carried at this date's closing rate rather than
+        // the rate on the day, so the arising figure has to be taken at the
+        // same rate the consolidation used or the first period never
+        // reconciles.
+        const nciGoodwill = currentWorking?.goodwillCarrying.nciCarrying ?? zero;
         const arising = nci.share(movement.closing, rounding).plus(nciGoodwill);
         return Object.freeze({
           entity: movement.entity,
@@ -271,6 +282,7 @@ export function nciMovements(
           shareOfTranslation: zero,
           shareOfResult: zero,
           shareOfOther: zero,
+          goodwillRetranslation: zero,
           arisingOnAcquisition: arising,
           closing,
           unexplained: closing.minus(arising),
@@ -281,16 +293,24 @@ export function nciMovements(
       const shareOfTranslation = nci.share(movement.translationEffect, rounding);
       const shareOfResult = currentWorking?.nciProfitShare ?? nci.share(movement.result, rounding);
       const shareOfOther = nci.share(movement.other, rounding);
+      // The stake's own goodwill retranslated. Not a share of anything: the
+      // stake owns whatever goodwill was attributed to it and nothing else, so
+      // under the proportionate method this is nil however large the stake is.
+      const goodwillRetranslation = (currentWorking?.goodwillCarrying.nciCarrying ?? zero).minus(
+        priorWorking?.goodwillCarrying.nciCarrying ?? zero,
+      );
       const rolled = opening
         .plus(shareOfTranslation)
         .plus(shareOfResult)
-        .plus(shareOfOther);
+        .plus(shareOfOther)
+        .plus(goodwillRetranslation);
       return Object.freeze({
         entity: movement.entity,
         opening,
         shareOfTranslation,
         shareOfResult,
         shareOfOther,
+        goodwillRetranslation,
         arisingOnAcquisition: zero,
         closing,
         unexplained: closing.minus(rolled),
@@ -315,6 +335,10 @@ export function nciSchedule(
     { label: "Share of the result for the period", amount: total((m) => m.shareOfResult) },
     { label: "Share of the translation effect", amount: total((m) => m.shareOfTranslation) },
     { label: "Share of other movements in net assets", amount: total((m) => m.shareOfOther) },
+    {
+      label: "Its own goodwill, retranslated",
+      amount: total((m) => m.goodwillRetranslation),
+    },
     { label: "Arising on acquisition", amount: total((m) => m.arisingOnAcquisition) },
     // The mirror of arising on acquisition. A stake in a company that has left
     // the group is not remeasured to nil, it is removed, and naming the line
@@ -352,6 +376,15 @@ export function nciSchedule(
  * simply this period's adjustment less last period's. There is nothing to
  * apportion and so nothing to round, and `unexplained` should be nil for any
  * group whose entities did not change.
+ *
+ * Two things feed it, though, and only one of them is in the trial balances.
+ * An entity's translation adjustment is the residual of restating *its own
+ * books*. Goodwill is not in anybody's books — it exists only at the group
+ * level — so retranslating it at the closing rate puts a second figure into
+ * the same reserve that no entity's adjustment knows about. It gets its own
+ * line per entity. Leaving it out would not have made the reserve wrong; it
+ * would have left the whole of it under "not explained by the above", which is
+ * the one line a reader should be able to ignore.
  */
 export function translationReserveSchedule(
   prior: Consolidation,
@@ -379,6 +412,28 @@ export function translationReserveSchedule(
     const stillThere = current.aggregation.entities.some((c) => c.entity === entity);
     if (stillThere || before.isZero) continue;
     lines.push({ label: `${entity} — no longer consolidated`, amount: before.negated() });
+  }
+
+  // Goodwill's own exchange difference, which is in the reserve and in no
+  // entity's translation adjustment. Credit-positive like the reserve itself,
+  // so it is negated here to match the raw adjustments above and negated back
+  // with them at the end.
+  const priorGoodwill = new Map(
+    prior.workings.map((w) => [w.entity, w.goodwillCarrying.groupExchangeDifference] as const),
+  );
+  for (const working of current.workings) {
+    const before = priorGoodwill.get(working.entity) ?? zero;
+    const movement = working.goodwillCarrying.groupExchangeDifference.minus(before);
+    if (movement.isZero) continue;
+    lines.push({
+      label: `${working.entity} — goodwill retranslated`,
+      amount: movement.negated(),
+    });
+  }
+  for (const [entity, before] of priorGoodwill) {
+    const stillThere = current.workings.some((w) => w.entity === entity);
+    if (stillThere || before.isZero) continue;
+    lines.push({ label: `${entity} — goodwill no longer carried`, amount: before });
   }
 
   const opening = prior.translationReserve;
