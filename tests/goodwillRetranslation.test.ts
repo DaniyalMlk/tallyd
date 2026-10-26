@@ -141,7 +141,7 @@ describe("goodwill on a foreign operation is carried at the closing rate", () =>
       presentation: GBP,
     });
     expect(() => goodwillAt(acquisition, { rates: acquisitionOnly }, date("2026-12-31"))).toThrow(
-      /Goodwill on S is EUR and has to be carried at the GBP closing rate/,
+      /Goodwill on S is EUR and has to be stated in GBP/,
     );
   });
 });
