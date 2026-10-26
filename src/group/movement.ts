@@ -291,14 +291,25 @@ export function nciMovements(
 
       const opening = priorWorking?.nciClosing ?? zero;
       const shareOfTranslation = nci.share(movement.translationEffect, rounding);
-      const shareOfResult = currentWorking?.nciProfitShare ?? nci.share(movement.result, rounding);
+      // The allocation rather than the raw share, because a group-level
+      // charge the subsidiary's books never saw — goodwill written off — is
+      // part of what the stake is allocated out of the period.
+      const shareOfResult =
+        currentWorking?.nciResultShare ?? nci.share(movement.result, rounding);
       const shareOfOther = nci.share(movement.other, rounding);
       // The stake's own goodwill retranslated. Not a share of anything: the
       // stake owns whatever goodwill was attributed to it and nothing else, so
       // under the proportionate method this is nil however large the stake is.
-      const goodwillRetranslation = (currentWorking?.goodwillCarrying.nciCarrying ?? zero).minus(
-        priorWorking?.goodwillCarrying.nciCarrying ?? zero,
-      );
+      //
+      // The movement in the *exchange difference* rather than in the carrying
+      // amount, because the carrying amount also moves when goodwill is
+      // written off — and the stake's share of a write-off is already in
+      // `shareOfResult`, which is where a loss of the period belongs. Taking
+      // the carrying amount here would count it twice and the schedule would
+      // stop reconciling, which is how this was found.
+      const goodwillRetranslation = (
+        currentWorking?.goodwillCarrying.nciExchangeDifference ?? zero
+      ).minus(priorWorking?.goodwillCarrying.nciExchangeDifference ?? zero);
       const rolled = opening
         .plus(shareOfTranslation)
         .plus(shareOfResult)
