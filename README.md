@@ -1063,6 +1063,22 @@ That table prints whatever `--show` says as soon as any entity was not the
 group's for the whole period, because a consolidation covering nine months of
 one company and twelve of another should not be read without knowing it.
 
+**The window decides the rate as well as the months.** Nine months of results
+are translated at the average rate over those nine months, not over the year.
+Both ends of a company's life in the group work this way, and the symmetry is
+the argument: the months after a sale are not the group's and neither are the
+months before an acquisition. Averaging over the whole year would mix in rates
+from the quarter whose result has just been taken out as pre-acquisition — the
+same class of quiet error as taking all twelve months of profit, and harder to
+see, because the figure it produces is a plausible number rather than an
+obviously large one. On the cross-border fixture it is 1.18% of the rate over a
+nine-month window and 3.54% over a three-month one, in opposite directions.
+
+The `wholePeriodRegardless` option takes the whole year's average with it. That
+option exists so the difference can be shown rather than described, and a result
+which includes the pre-acquisition months belongs at an average that includes
+them too; half-applying the window would give a figure that is neither.
+
 The boundary is the acquisition date inclusive. It is arbitrary and it has to be
 consistent with something, and the thing it has to be consistent with is that
 net assets at acquisition are measured *as at* that date. Otherwise a sale made

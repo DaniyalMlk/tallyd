@@ -194,6 +194,25 @@ all disagree slightly.
       matters, which keeps their hand-worked figures checkable and leaves them
       unable to tell a closing rate from an acquisition rate.
 
+- [x] **19 — The same treatment at both ends.** A company acquired part-way
+      through the period had its result translated at the average rate over the
+      whole period, while a company sold part-way through used the window. Both
+      now use the window: the months before an acquisition are not the group's
+      any more than the months after a sale are, and the result left on the
+      income accounts after the pre-acquisition close is the result of the part
+      of the year the group owned. Averaging over the whole period mixed in
+      rates from months whose result had already been taken out — an error with
+      no symptom, because what it produces is a perfectly plausible number. On
+      a nine-month window it is 1.18% of the rate and on a three-month one
+      3.54%, in opposite directions. Where the caller asks for the whole period
+      regardless, the average follows: a result that includes the
+      pre-acquisition months belongs at an average that includes them, or the
+      figure is neither one thing nor the other. The suite's mid-year fixture is
+      sterling on both sides and says so, so nothing in it could see any of
+      this; the cross-border fixture now carries a mid-year acquisition and its
+      mirror-image disposal, on one set of books, so the two ends can be
+      compared rather than described.
+
 ## Current state
 
 | Module | What it does |
@@ -350,11 +369,6 @@ all disagree slightly.
   subsidiary is measured against what the subsidiary paid, in full. The
   alternative treatment, which scales that cost by the group's interest in the
   buyer, is not available.
-- An entity acquired part-way through the period still has its result translated
-  at the average rate over the whole period rather than over the window it was
-  the group's for. A disposal does use the window, because the months after a
-  sale are not the group's and neither are their rates; the two ends should
-  agree and do not.
 - Nothing verifies that an entity's books were closed at the start of the
   reporting period. Where they were not, and no acquisition date falls inside
   the period to give the consolidation a reason to close them, the result is
@@ -391,7 +405,9 @@ all disagree slightly.
 - The pre-acquisition result is computed and reported but never translated. It
   is shown in the entity's own currency, which is honest, and a reader
   comparing it with the presentation-currency figures beside it has to do the
-  conversion themselves.
+  conversion themselves. The rate is not the obstacle: the natural one is the
+  average over the months before control was obtained, and the consolidation
+  now takes exactly that kind of average for the other half of the year.
 - The movement schedules explain the outside stake and the translation reserve
   and nothing else. Goodwill, the group's own reserves and the individual lines
   of the balance sheet get a comparative column and a movement, which is the
