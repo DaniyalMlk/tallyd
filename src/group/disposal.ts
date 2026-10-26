@@ -65,7 +65,7 @@ import type { RateTable } from "../fx/table.js";
 import { Interest } from "./interest.js";
 import { GroupError, type GroupStructure } from "./structure.js";
 import { GROUP_ACCOUNTS } from "./accounts.js";
-import { type Acquisition, netAssets } from "./acquisition.js";
+import { type Acquisition, type GoodwillCarrying, goodwillAt, netAssets } from "./acquisition.js";
 
 export interface DisposalInput {
   /** The company sold. */
@@ -112,6 +112,13 @@ export interface Disposal {
   readonly nciAtDisposal: Money;
   /** The goodwill that has to come off with the company. */
   readonly goodwillDerecognised: Money;
+  /**
+   * How that figure was arrived at: the functional-currency measurement, the
+   * rate on the day control was lost, and the exchange difference since
+   * acquisition. Nil difference for a company whose books were kept in the
+   * presentation currency.
+   */
+  readonly goodwillCarrying: GoodwillCarrying;
   /** Net assets, less the outside stake, plus goodwill. What the group is giving up. */
   readonly carryingAmount: Money;
   /** Proceeds over the carrying amount. Nil when the sale was at a loss. */
@@ -259,8 +266,21 @@ export function disposalOf(
   // formulation the consolidation uses at any other date, so that the claim
   // being removed is exactly the claim that was there the day before.
   const nci = entity.nonControlling;
-  const nciAtDisposal = nci.share(netAssetsAtDisposal, rounding).plus(acquisition.nciGoodwill);
-  const goodwillDerecognised = acquisition.goodwill;
+  // Goodwill comes off at what the group was carrying it at on the day, which
+  // for a foreign operation is its functional-currency measurement at that
+  // day's closing rate and not the figure struck when the company was bought.
+  // Derecognising the acquisition-date figure would leave the difference
+  // sitting in the goodwill account with no company attached to it, and would
+  // measure the gain against a carrying amount the balance sheet never showed.
+  const goodwillCarrying = goodwillAt(
+    acquisition,
+    { rates: options.rates, rounding },
+    disposed,
+  );
+  const nciAtDisposal = nci
+    .share(netAssetsAtDisposal, rounding)
+    .plus(goodwillCarrying.nciCarrying);
+  const goodwillDerecognised = goodwillCarrying.carrying;
   const carryingAmount = netAssetsAtDisposal.minus(nciAtDisposal).plus(goodwillDerecognised);
 
   const difference = proceeds.minus(carryingAmount);
@@ -278,6 +298,7 @@ export function disposalOf(
     netAssetsBasis,
     nciAtDisposal,
     goodwillDerecognised,
+    goodwillCarrying,
     carryingAmount,
     gain,
     loss,
