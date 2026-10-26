@@ -886,11 +886,14 @@ left it out would be wrong by a quarter of the provision while looking complete.
 
 ```
 HS — acquired 2025-01-02, 60% to the group, non-controlling interest at fair-value
-  Consideration transferred                        128700.00
-  Non-controlling interest at acquisition           56736.00
-  Net assets acquired                             -126080.00
-  Goodwill                                          59356.00
-    of which attributable to the outside stake       6304.00
+                                                         USD           GBP
+  Consideration transferred                        163324.87     128700.00
+  Non-controlling interest at acquisition           72000.00      56736.00
+  Net assets acquired                             -160000.00    -126080.00
+  Goodwill                                          75324.87      59356.00
+    of which attributable to the outside stake       8000.00       6304.00
+  Measured in USD and translated at the rate on 2025-01-02: goodwill on a
+  foreign operation is an asset of that operation.
 ```
 
 Goodwill is the consideration plus the non-controlling interest at acquisition,
@@ -900,6 +903,35 @@ measured is a choice per acquisition and it changes the answer: proportionately,
 as its share of the identifiable net assets, or at what the outside stake was
 actually worth on the day, in which case the difference is goodwill belonging to
 the outside shareholders.
+
+**Two columns, because the subtraction happened in the left one.** Goodwill on a
+foreign operation is an asset *of that operation*: what the extra money bought —
+a name, a position, people who stay — is a thing in that country, priced in that
+currency, and the group owning it does not move it. So the arithmetic runs in the
+subsidiary's currency. The consideration comes the other way, into that currency
+at the rate on the day; the net assets read from its own books need no
+translating because they are already there. A single sterling column would be
+actively misleading: a reader adding its three figures does not quite get the
+fourth, because each is a rounding of a dollar amount and the fourth is a
+rounding of their dollar difference.
+
+Having the measurement in dollars is also what makes the figure retranslatable.
+Goodwill is carried at the **closing rate** at every reporting date, along with
+the rest of that subsidiary's assets, and the exchange difference goes to the
+translation reserve — the group's share as a posting of its own, the outside
+stake's share through its claim, which is measured afresh at each date and so
+already contains it. Posting the stake's share as well double-counts it. Which
+share is whose follows how the stake was *measured* rather than how large it is:
+under the proportionate method the stake owns no goodwill and therefore none of
+the difference, however much of the company it owns. The bargain purchase gain is
+not retranslated — a gain is recognised once, at the rate on the day, and is part
+of reserves afterwards rather than an asset sitting there to remeasure.
+
+"The closing rate" means the date that subsidiary's own assets were read at,
+which for a company sold during the period is the day it went. The disposal
+derecognises goodwill at that same figure, so the gain is measured against a
+carrying amount the balance sheet actually showed, and nothing is left in the
+goodwill account for a company that is no longer in the group.
 
 A price *below* the net assets acquired is a bargain purchase and shows up as a
 gain in the income statement. Negative goodwill sitting in the balance sheet
@@ -1020,12 +1052,23 @@ The share schedules apply each entity's own outside fraction to each component:
 
 ```
 Non-controlling interest
-  At the start of the period                   152864.00
+  At the start of the period                   152720.00
   Share of the result for the period            24651.27
   Share of the translation effect               -3040.00
   Share of other movements in net assets         -422.69
-  At the reporting date                        174052.58
+  Its own goodwill, retranslated                 -160.00
+  At the reporting date                        173748.58
 ```
+
+The last of those lines is not a share of anything, and that is the point of
+giving it its own row. Goodwill on a foreign operation is an asset of that
+operation and is carried at its closing rate, so the sterling amount moves
+every year; but the outside stake owns only whatever goodwill was *attributed*
+to it when the company was bought. Systems' stake was measured at fair value,
+so it owns a slice and therefore the exchange difference on that slice.
+Nord's was measured proportionately, so it owns none of the goodwill and none
+of the difference — which is a fact about the measurement and not about the
+size of the stake.
 
 That closing figure is what the consolidation reports, not what the lines add
 up to. Applying a fraction three times rounds three times where measuring

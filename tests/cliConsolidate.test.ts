@@ -157,8 +157,8 @@ describe("tallyd consolidate", () => {
     const reloaded = ledgerFromJson(files["group-books.json"] as string);
     reloaded.verify();
     expect(reloaded.size).toBe(9);
-    expect(reloaded.balanceOf("1290", "GBP").toDecimalString()).toBe("113436.00");
-    expect(reloaded.balanceOf("3400", "GBP").toDecimalString()).toBe("-174052.58");
+    expect(reloaded.balanceOf("1290", "GBP").toDecimalString()).toBe("108178.50");
+    expect(reloaded.balanceOf("3400", "GBP").toDecimalString()).toBe("-173748.58");
   });
 
   it("takes the reporting date and period from the flags over the document", () => {

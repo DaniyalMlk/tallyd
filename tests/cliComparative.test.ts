@@ -95,9 +95,12 @@ describe("tallyd consolidate --comparative", () => {
   it("carries both columns and the movement between them", () => {
     const result = run(WITH_COMPARATIVE, harness());
     const line = result.stdout.split("\n").find((l) => l.startsWith("1290"));
-    expect(line).toContain("113436.00");
-    // Goodwill did not move, so the movement column is nil on that row.
-    expect(line?.trimEnd().endsWith("0.00")).toBe(true);
+    expect(line).toContain("108178.50");
+    expect(line).toContain("110945.60");
+    // Both subsidiaries keep their books abroad, so goodwill on each is an
+    // asset of a foreign operation and moves with its closing rate. The
+    // movement column carries that and nothing else.
+    expect(line?.trimEnd().endsWith("-2767.10")).toBe(true);
   });
 
   it("shows the outside stake and the reserve rolled forward", () => {
@@ -183,8 +186,8 @@ describe("the comparative as JSON", () => {
     const comparative = parsed()["comparative"] as unknown as Record<string, unknown>;
     const rows = comparative["rows"] as { account: string; current: string; prior: string }[];
     const goodwill = rows.find((r) => r.account === "1290");
-    expect(goodwill?.current).toBe("113436.00");
-    expect(goodwill?.prior).toBe("113436.00");
+    expect(goodwill?.current).toBe("108178.50");
+    expect(goodwill?.prior).toBe("110945.60");
   });
 
   it("carries the net-asset decomposition per entity", () => {
@@ -200,15 +203,15 @@ describe("the comparative as JSON", () => {
   it("carries each schedule with its unexplained line, even when it is nil", () => {
     const comparative = parsed()["comparative"] as unknown as Record<string, unknown>;
     const stake = comparative["nonControllingInterest"] as Record<string, unknown>;
-    expect(stake["opening"]).toBe("152864.00");
-    expect(stake["closing"]).toBe("174052.58");
+    expect(stake["opening"]).toBe("152720.00");
+    expect(stake["closing"]).toBe("173748.58");
     expect(stake["unexplained"]).toBe("0.00");
     expect(stake["reconciles"]).toBe(true);
     expect((stake["lines"] as unknown[]).length).toBeGreaterThan(0);
 
     const reserve = comparative["translationReserve"] as Record<string, unknown>;
     expect(reserve["what"]).toBe("Translation reserve");
-    expect(reserve["closing"]).toBe("-22164.01");
+    expect(reserve["closing"]).toBe("-27117.51");
   });
 
   it("leaves the single-date figures exactly where they were", () => {

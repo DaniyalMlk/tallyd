@@ -194,6 +194,32 @@ all disagree slightly.
       matters, which keeps their hand-worked figures checkable and leaves them
       unable to tell a closing rate from an acquisition rate.
 
+- [x] **18 — Goodwill retranslated.** Goodwill on a foreign operation is an
+      asset of that operation, so it is carried at the closing rate at every
+      reporting date along with the rest of that company's assets rather than
+      at the rate on the day it was bought. On the two-period cross-border
+      fixture that is 46,800 against 41,600 — 11.1% of the carrying amount,
+      and in the direction that looks stable rather than wrong, which is why
+      it went unnoticed. The exchange difference goes to the translation
+      reserve: the group's share as a posting of its own, and the outside
+      stake's share through its claim, which is measured afresh at each date
+      and so already contains it. Posting the stake's share as well
+      double-counts it, which was the first version of this and over-credited
+      the stake by 300.00. The split follows how the stake was measured rather
+      than how large it is — under the proportionate method the stake owns no
+      goodwill and therefore none of the difference, however much of the
+      company it owns. The bargain purchase gain is not retranslated: a gain
+      is recognised once, at the rate on the day, and is part of reserves
+      afterwards rather than an asset to remeasure. "The closing rate" means
+      the date that entity's own assets were read at, which for a company sold
+      during the period is the day it went; the disposal derecognises goodwill
+      at that figure, so the gain is measured against a carrying amount the
+      balance sheet actually showed and nothing is left in the goodwill
+      account for a company that has gone. Both movement schedules name the
+      difference instead of leaving it under "not explained by the above", and
+      the front page accounts for the reserve by both the things that are in
+      it rather than by the one of them that used to be all of it.
+
 ## Current state
 
 | Module | What it does |
@@ -340,9 +366,10 @@ all disagree slightly.
   equity accounted, so a 30% holding shows in the group's books at whatever the
   investment cost and nothing of its results reaches the consolidated income
   statement.
-- Goodwill is measured once and never impaired, and it is carried at the
-  acquisition-date rate rather than retranslated at the closing rate as goodwill
-  arising on a foreign operation should be.
+- Goodwill is measured once and never impaired. It is retranslated at the
+  closing rate, as goodwill arising on a foreign operation should be, but
+  nothing ever writes it down: an impairment is a judgement about the business
+  the group bought and there is no way to express one.
 - Fair value adjustments on acquisition can only be given as a single figure for
   the net assets acquired. There is no way to say which asset was written up, so
   nothing depreciates the uplift afterwards.
@@ -364,7 +391,11 @@ all disagree slightly.
   the gain, and *cumulative* is the word: the consolidation measures one
   period's translation adjustment and has never carried the running total, which
   is a fact about several previous years of rates that no single reporting date
-  supplies.
+  supplies. Goodwill's own exchange difference is the exception and is not an
+  answer to the rest of it: that one *is* cumulative, because it is measured
+  against the acquisition-date figure rather than against last period's, so it
+  is known at any single date. It is still left in the reserve rather than
+  recycled, for the same reason as the rest.
 - A partial disposal cannot be expressed. Selling 80% down to 30% loses control
   and leaves a holding; selling down to 60% loses nothing and is a transaction
   between owners rather than a disposal at all. Both need the retained interest
@@ -393,9 +424,12 @@ all disagree slightly.
   comparing it with the presentation-currency figures beside it has to do the
   conversion themselves.
 - The movement schedules explain the outside stake and the translation reserve
-  and nothing else. Goodwill, the group's own reserves and the individual lines
-  of the balance sheet get a comparative column and a movement, which is the
-  arithmetic, but no schedule saying what the movement was made of.
+  and nothing else. The group's own reserves and the individual lines of the
+  balance sheet get a comparative column and a movement, which is the
+  arithmetic, but no schedule saying what the movement was made of. Goodwill is
+  a near miss: its movement is named inside the two schedules it feeds, so a
+  reader can see what it did to the reserve and to the outside stake, but it
+  has no schedule of its own rolling the account forward.
 - The dashboard knows nothing about groups. It reconciles one bank account for
   one company, which is what it is for, but there is no view of a consolidation.
 - The matcher still holds both sides in memory. A year of a busy account
