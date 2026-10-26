@@ -175,6 +175,25 @@ all disagree slightly.
       manifest and holds `id-token: write` and nothing else, so no credential
       is stored anywhere.
 
+- [x] **17 — Goodwill in the currency it was bought in.** The acquisition
+      arithmetic moves into the acquired company's own currency, because
+      goodwill on a foreign operation is an asset of that operation: what the
+      extra money bought is a thing in that country, priced in its currency.
+      The consideration and any supplied fair values come the other way, into
+      that currency at the rate on the day; the net assets read from the
+      company's own books need no translating because they are already there.
+      Every figure is then carried in both currencies, the group's side being
+      one translation of the measurement rather than a residual of three
+      translated inputs — which matters because a residual has nothing to
+      absorb a rounding error, and the two orderings disagree by a minor unit
+      on a fixture that is in the suite to show it. The workings print two
+      columns, so the subtraction is checkable in the currency it was done in.
+      A group reporting in the currency its subsidiary already keeps looks up
+      no rate and nothing moves. The suite gains its first group fixture whose
+      rate moves: every other one holds EUR/GBP at 0.50 on every date that
+      matters, which keeps their hand-worked figures checkable and leaves them
+      unable to tell a closing rate from an acquisition rate.
+
 ## Current state
 
 | Module | What it does |
