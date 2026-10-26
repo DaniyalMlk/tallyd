@@ -415,10 +415,20 @@ export function consolidate(
     // rate like the rest of them. The outside stake's claim therefore includes
     // its goodwill at the closing rate too, not at the rate on the day the
     // company was bought.
+    //
+    // "The closing rate" means the same date the rest of that entity's assets
+    // were read at, which for a company sold during the period is the day it
+    // went and not the reporting date. Using the reporting date here left the
+    // elimination putting goodwill on at December's rate while the disposal
+    // took it off at September's, and the difference stayed in the goodwill
+    // account for a company that was no longer in the group.
+    const readAt =
+      aggregation.entities.find((c) => c.entity === entity.code)?.control.consolidateAt ??
+      aggregation.asAt;
     const goodwillCarrying = goodwillAt(
       acquisition,
       { rates: options.rates, rounding },
-      aggregation.asAt,
+      readAt,
     );
     const nciClosing = nci.share(netAssetsNow, rounding).plus(goodwillCarrying.nciCarrying);
 
