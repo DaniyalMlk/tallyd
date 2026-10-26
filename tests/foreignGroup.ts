@@ -105,3 +105,41 @@ export const FOREIGN_ACQUISITION: AcquisitionInput = {
   entity: "S",
   consideration: Money.parse("80000.00", GBP),
 };
+
+/**
+ * The same euro subsidiary, bought on 1 April rather than held all along.
+ *
+ * The suite's existing mid-year fixture is sterling on both sides and says so
+ * in its own comment, so nothing in it can see which average rate a mid-year
+ * acquisition is translated at. On the rate table above the two candidate
+ * averages for 2026 are 0.843726 over the whole year and 0.853650 over the
+ * nine months from 2 April, a difference of 1.18%.
+ */
+export const MID_YEAR_FOREIGN = GroupStructure.build(
+  [
+    { code: "P", name: "Parent Ltd", currency: GBP },
+    { code: "S", name: "Sub GmbH", currency: EUR, parent: "P", holding: "80", acquired: "2026-04-01" },
+  ],
+  { presentation: "GBP", name: "Mid-year Cross-border Group" },
+);
+
+/**
+ * And sold on 1 April, which is the mirror image: three months of the group's
+ * rather than nine. The two ends of a company's life in a group should be
+ * treated the same way, and this pair is what makes that checkable.
+ */
+export const MID_YEAR_SOLD = GroupStructure.build(
+  [
+    { code: "P", name: "Parent Ltd", currency: GBP },
+    {
+      code: "S",
+      name: "Sub GmbH",
+      currency: EUR,
+      parent: "P",
+      holding: "80",
+      acquired: "2025-01-01",
+      disposed: "2026-04-01",
+    },
+  ],
+  { presentation: "GBP", name: "Mid-year Disposal Group" },
+);
