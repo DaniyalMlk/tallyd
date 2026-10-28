@@ -8,6 +8,14 @@ processor's fee, the dates are off by two days of settlement lag, the descriptio
 `SQ *COFFEE 4471` and your ledger says `Client lunch — Acme`, and one deposit covers
 three invoices. That matching problem is what this project is actually about.
 
+**[daniyalmlk.github.io/tallyd](https://daniyalmlk.github.io/tallyd/)** — the
+front page, with the reconciliation dashboard running on it rather than
+pictured. The dashboard is one HTML file with its styles, its script and its
+data inlined and nothing fetched, so the site generates a year of books,
+reconciles them and publishes the result; accept and reject suggestions in it
+and the bridge recomputes in front of you. Every figure on that page comes from
+the same gate as the table below.
+
 ## What is checked, and against what
 
 A reconciliation engine is easy to describe and hard to believe. Every one of

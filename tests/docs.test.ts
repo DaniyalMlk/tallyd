@@ -24,6 +24,7 @@
  * actually catch a drift.
  */
 
+import { readdirSync, readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { buildSite, counts, DASHBOARD, DASHBOARD_FILE, evidenceRows, PACKAGE, SOURCE } from "../docs/site.js";
 import { reviewDashboard, SAMPLE } from "../docs/dashboard.js";
@@ -180,6 +181,42 @@ describe("every count is read off the thing it counts", () => {
     // repository; this is the inside half of that claim.
     expect(size.exports).toBeGreaterThan(100);
     expect(page).toContain(`exports\n  ${size.exports} names`);
+  });
+});
+
+describe("the suite size the roadmap states", () => {
+  // Found the same way the stale CI line was: by reading a claim about this
+  // repository and checking it. It said 1,904 tests across 79 files, which was
+  // true once. Nothing recomputed it, so nothing noticed.
+  const roadmap = readFileSync(new URL("../ROADMAP.md", import.meta.url), "utf8");
+  const stated = /(\d[\d,]*) tests across (\d+) files/.exec(roadmap);
+  const files = readdirSync(new URL("../tests/", import.meta.url)).filter((name) =>
+    name.endsWith(".test.ts"),
+  );
+
+  it("names a size at all", () => {
+    expect(stated).not.toBeNull();
+  });
+
+  it("counts the files exactly, because that is countable", () => {
+    expect(Number(stated?.[2])).toBe(files.length);
+  });
+
+  it("counts the tests to within a quarter", () => {
+    // A suite cannot count itself from inside, so this parses the `it(` and
+    // `test(` call sites instead. That undercounts: a table-driven block
+    // registers one call site and many tests. The band is why it is a band,
+    // and it is tight enough that a dropped file is caught and loose enough
+    // that adding a case to a loop is not a failing build.
+    let callSites = 0;
+    for (const name of files) {
+      const source = readFileSync(new URL(`../tests/${name}`, import.meta.url), "utf8");
+      callSites += (source.match(/^\s*(?:it|test)(?:\.each\([^)]*\))?\s*\(/gm) ?? []).length;
+    }
+    const claimed = Number((stated?.[1] ?? "0").replace(/,/g, ""));
+    expect(callSites).toBeGreaterThan(100);
+    expect(claimed).toBeGreaterThan(callSites * 0.75);
+    expect(claimed).toBeLessThan(callSites * 2.5);
   });
 });
 
