@@ -113,7 +113,12 @@ describe("every figure quoted outside the table is measured", () => {
   const measured = evidence();
 
   it("quotes the consolidation residual as the gate reports it", () => {
-    expect(page).toContain(measured.exact.groupResidual);
+    // In its own markup, not anywhere on the page. A break sweep caught this:
+    // the headline was typed as `0.01 GBP` and a bare containment check still
+    // passed, because the right figure was sitting in the evidence table two
+    // screens further down. Every figure quoted outside the table is pinned to
+    // the element it is rendered into for that reason.
+    expect(page).toContain(`<strong>${measured.exact.groupResidual}</strong>`);
     expect(report).toContain(measured.exact.groupResidual);
     // The claim is that it is nil, so the page would be making a different
     // and much weaker point if it ever stopped being nil.
@@ -134,15 +139,28 @@ describe("every figure quoted outside the table is measured", () => {
 
   it("quotes the learning effect in the direction the gate measured it", () => {
     const { learning } = measured;
-    expect(page).toContain(`${(learning.coldRecall * 100).toFixed(1)}%`);
-    expect(page).toContain(`${(learning.warmRecall * 100).toFixed(1)}%`);
+    const cold = (learning.coldRecall * 100).toFixed(1);
+    const warm = (learning.warmRecall * 100).toFixed(1);
+    // Both figures in one string, in order. Asserting them separately passes
+    // on a page that quotes the warm figure twice -- which is what a sweep
+    // that swapped the two produced, because the evidence table carries the
+    // cold figure and satisfied the second half on its own.
+    expect(page).toContain(`lifted recall from\n    ${cold}% to\n    ${warm}% in`);
     expect(page).toContain(`from ${learning.coldQueue} to\n    ${learning.warmQueue}`);
     expect(learning.warmRecall).toBeGreaterThan(learning.coldRecall);
     expect(learning.warmQueue).toBeLessThan(learning.coldQueue);
   });
 
   it("quotes precision as the worst the sweep saw, not the mean", () => {
-    expect(page).toContain(measured.accuracy.worstPrecision.toFixed(3));
+    expect(page).toContain(
+      `below\n  ${measured.accuracy.worstPrecision.toFixed(3)}, and that is deliberate`,
+    );
+    // A different measurement that happens to share a value: the warm figure
+    // is the one the memory section quotes, and pinning it to the worst-period
+    // figure would make the page pass on a day they diverged.
+    expect(page).toContain(
+      `precision still\n    ${measured.learning.warmPrecision.toFixed(3)}`,
+    );
     expect(measured.accuracy.worstPrecision).toBe(1);
   });
 });
