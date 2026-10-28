@@ -63,7 +63,8 @@
     "demo:evidence": "vite-node src/demo/mainEvidence.ts",
     "cli": "vite-node src/cli/main.ts --",
     "bench": "vite-node src/cli/main.ts -- bench",
-    "generate": "vite-node src/cli/main.ts -- generate"
+    "generate": "vite-node src/cli/main.ts -- generate",
+    "docs": "vite-node docs/build-site.ts"
   },
   "devDependencies": {
     "@types/node": "^22.10.2",
