@@ -430,9 +430,16 @@ export function evidence(): Evidence {
  * The output is what `tests/readmeEvidence.test.ts` reads: every figure the
  * front page quotes has to appear in this text, which is how a number in the
  * document and a number in the code are kept from drifting apart.
+ *
+ * `measured` exists for callers that want the table *and* the figures behind
+ * it: `docs/site.ts` quotes several of them outside the table and would
+ * otherwise pay for the whole sweep twice. Passing a measurement in skips the
+ * checks `evidence()` performs, which is only safe because the measurement
+ * cannot have come from anywhere else. It is deliberately not a way to render
+ * a table from figures nothing checked.
  */
-export function evidenceReport(): string {
-  const { accuracy, index, learning, exact, unrealised } = evidence();
+export function evidenceReport(measured?: Evidence): string {
+  const { accuracy, index, learning, exact, unrealised } = measured ?? evidence();
   const stock = unrealisedRows(unrealised);
   const small = index[0];
   const large = index[index.length - 1];

@@ -18,6 +18,6 @@
     "verbatimModuleSyntax": true,
     "isolatedModules": true
   },
-  "include": ["src/**/*.ts", "tests/**/*.ts"],
+  "include": ["src/**/*.ts", "tests/**/*.ts", "docs/**/*.ts"],
   "exclude": ["node_modules", "dist"]
 }

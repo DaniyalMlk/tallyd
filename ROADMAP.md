@@ -295,6 +295,29 @@ all disagree slightly.
       one. It counts towards whether the comparative hangs together, because a
       schedule outside that flag is a schedule nobody notices.
 
+- [x] **22 — A front page, generated from the engine.** The repository was the
+      only way to see what this does, and the dashboard — the one artefact here
+      worth looking at rather than reading about — was invisible to anyone who
+      had not installed Node. The site is generated rather than written: every
+      figure comes from the evidence gate the README already quotes, the counts
+      are read off the chart of accounts and the package's own export list, and
+      the test fails in both directions, so a figure cannot move without the
+      page moving and the page cannot quote a row the gate does not produce.
+      The dashboard on it is the dashboard, built at publish time from a year
+      of generated books — which needs no bundler, because the thing it claims
+      about itself is that it inlines everything and fetches nothing, and
+      putting it in an iframe on a static site demonstrates that rather than
+      asserting it. The page quotes the artefact's own size and counts,
+      including the 900-odd KB that embedding every posting costs, since that
+      trade is in the gaps list below and belongs on the page too. Breaking it
+      on purpose sixteen ways found two weaknesses in the gate itself: a wrong
+      headline figure passed because the right one was sitting in the evidence
+      table further down, and a learning effect quoted backwards passed the
+      same way. Every figure outside the table is now pinned to the element it
+      is rendered into. Looking at the rendered page rather than trusting the
+      build found two more faults: two column rails that agreed at every width
+      except the widest, and a footer whose own padding ate its measure.
+
 ## Current state
 
 | Module | What it does |
@@ -377,13 +400,17 @@ all disagree slightly.
 | `src/demo/midYear.ts` | A company bought in April, consolidated both ways |
 | `src/group/disposal.ts` | What a company was carried at, and what it sold for |
 | `src/demo/disposal.ts` | A company sold in September, removed and the gain measured |
+| `docs/site.ts` | The front page, rendered from the evidence gate and the chart |
+| `docs/dashboard.ts` | The published dashboard, built from a fixed sample of generated books |
 
-1904 tests across 79 files, typecheck clean.
+2085 tests across 89 files, typecheck clean.
 
 ## Known gaps
 
-- CI is not wired up. The intended pipeline is `npm run typecheck`, `npm test`,
-  and the four demos.
+- Nothing recomputes the suite size on the line above it, so it is a number
+  that goes stale quietly; `tests/docs.test.ts` now checks the file count
+  exactly and the test count loosely, which is the best a count of tests can do
+  from inside the suite it is counting.
 - The classification rules are a starting point and not a claim about anybody's
   business. They are written against the standard chart, in English, for a UK
   bank's descriptors; a different chart needs `--rules` and a different country

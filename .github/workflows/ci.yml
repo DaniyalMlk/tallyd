@@ -31,6 +31,40 @@ jobs:
       - name: Test
         run: npm test
 
+  demos:
+    # The demos are the only thing here that exercises the engine end to end
+    # the way a reader does: each one builds a set of books, runs a whole
+    # workflow over them and prints what it found. The suite can stay green
+    # while one of them throws on its first line, which is how a repository
+    # ends up with a README whose worked example does not run.
+    #
+    # `demo:evidence` is the gate the front page's figures come from -- it
+    # throws rather than prints when one leaves its band -- and the site
+    # generator renders the same measurement, so it is checked here, in the
+    # pages workflow and by the suite.
+    name: Every demo runs
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.x
+          cache: npm
+      - name: Install
+        run: npm ci
+      - name: The demos
+        run: |
+          set -e
+          for demo in demo demo:ingest demo:reconcile demo:reports demo:foreign \
+                      demo:group demo:periods demo:midyear demo:disposal; do
+            echo "--- npm run $demo"
+            npm run --silent "$demo" > /dev/null
+          done
+      - name: The front page's figures, as a gate
+        run: npm run --silent demo:evidence
+      - name: The site builds
+        run: npm run --silent docs
+
   package:
     name: The tarball installs and runs
     runs-on: ubuntu-latest
