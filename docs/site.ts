@@ -303,8 +303,8 @@ npx ${esc(PACKAGE)} dashboard -l books/books.json -s books/statement.csv -a 1110
 
 </main>
 
-<footer class="foot">
-  <p class="col--wide">tallyd, published as ${code("`" + PACKAGE + "`")}. Built
+<footer class="foot col--wide">
+  <p>tallyd, published as ${code("`" + PACKAGE + "`")}. Built
   from the engine&rsquo;s own evidence gate, so no figure on this page was typed
   by hand. <a href="${esc(SOURCE)}">Source</a>.</p>
 </footer>
@@ -351,14 +351,19 @@ const STYLE = `/*
   --mono: "SF Mono", "JetBrains Mono", "Cascadia Mono", ui-monospace, Menlo, monospace;
 
   /*
-   * One column for reading and a wider one for the three things that need the
-   * room: the masthead, the evidence table and the dashboard. The reading
-   * column is set to the measure rather than to something larger with the text
-   * ragged inside it.
+   * One left rail, and prose capped at the measure inside it.
+   *
+   * The first version centred the reading column and the wide column
+   * separately, which looks right until the viewport is wide enough that they
+   * stop sharing an edge: at 1440 the logo sat ninety pixels left of the
+   * headline under it. Two rails that agree at every width except the widest
+   * are worse than one, because the disagreement only shows up on the screens
+   * the page is most likely to be read on.
    */
   --measure: 38rem;
   --wide: 62rem;
   --gutter: 1.25rem;
+  --rail: max(var(--gutter), 50% - var(--wide) / 2);
 }
 
 @media (prefers-color-scheme: dark) {
@@ -377,8 +382,23 @@ const STYLE = `/*
   }
 }
 
-.col { padding-inline: max(var(--gutter), 50% - var(--measure) / 2); }
-.col--wide { padding-inline: max(var(--gutter), 50% - var(--wide) / 2); }
+.col, .col--wide { padding-inline: var(--rail); }
+
+/*
+ * Prose stays at the measure; the table and the dashboard take the full rail.
+ *
+ * Every selector here is a *child* of the element carrying the rail padding,
+ * deliberately. With border-box sizing, max-width includes padding, so an
+ * element that is both the rail and the measure is 38rem of which the rail
+ * eats all but a sliver -- which is exactly what the footer did until the
+ * class moved up to the footer element and off the paragraph inside it.
+ * (And the comment cannot use backticks: this whole stylesheet is a template
+ * literal, so a backtick in it ends the string.)
+ */
+.lede > *, .review__intro > *, .install > *, .covers > *, .foot > p,
+.evidence-section > p { max-width: var(--measure); }
+
+.lede h1 { max-width: 18ch; }
 
 *, *::before, *::after { box-sizing: border-box; }
 
@@ -451,7 +471,7 @@ pre code { font-size: inherit; }
 .masthead__nav {
   display: flex;
   flex-wrap: wrap;
-  gap: 1.25rem;
+  gap: 0.4rem 1.25rem;
   font-size: 0.9375rem;
 }
 
@@ -563,9 +583,8 @@ h1 {
 }
 
 .review__frame {
-  margin: 2rem auto 0;
-  max-width: calc(var(--wide) + 8rem);
-  padding-inline: var(--gutter);
+  margin: 2rem 0 0;
+  padding-inline: var(--rail);
 }
 
 .review__frame iframe {
@@ -644,6 +663,7 @@ h1 {
   .evidence { display: block; overflow-x: auto; }
   .evidence td:first-child { width: auto; min-width: 15rem; }
   .review__frame iframe { height: 70vh; }
+  .masthead__nav { gap: 0.35rem 0.9rem; font-size: 0.875rem; }
 }
 `;
 
