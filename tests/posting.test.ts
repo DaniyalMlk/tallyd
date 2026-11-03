@@ -357,11 +357,14 @@ describe("custom rules", () => {
     expect(() => propose([line("ANYTHING", "-1.00")], { rules })).toThrow(/matches on nothing/);
   });
 
-  it("refuses an unusable regex at the point it is used", () => {
+  it("refuses an unusable regex before it reads a line", () => {
     const rules: PostingRule[] = [
       { id: "bad", describe: "x", match: { regex: "([" }, account: "5800" },
     ];
     expect(() => propose([line("ANYTHING", "-1.00")], { rules })).toThrow(PostingRuleError);
+    // Not "at the point it is used": there is no line here to use it on.
+    // `ruleValidity.test.ts` holds the rest of that argument.
+    expect(() => propose([], { rules })).toThrow(PostingRuleError);
   });
 
   it("keeps the standard rules frozen against edits", () => {

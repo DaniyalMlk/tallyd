@@ -127,6 +127,8 @@ export {
   type ProposalSummary,
   PostingRuleError,
   standardRules,
+  checkRule,
+  checkRules,
   proposeEntries,
   applyProposals,
   summariseProposals,

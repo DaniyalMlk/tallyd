@@ -263,9 +263,83 @@ export interface ProposalOptions {
 
 const DEFAULT_PREFIX = "BNK";
 
-function matches(rule: PostingRule, line: StatementLine): boolean {
-  const text = line.normalisedDescription;
+/**
+ * Whether a rule can be used at all, decided from the rule and nothing else.
+ *
+ * Two of the three things that make a rule unusable — a match clause with no
+ * positive side, and a regex the engine cannot compile — are properties of the
+ * rule alone, with no reference to any statement. Deciding them while matching
+ * a line made the answer depend on the data, in three separate ways:
+ *
+ * - A rule matching only on `none` returned `false` for a line that contained
+ *   the excluded token, before reaching the complaint. So the same rule file
+ *   was accepted against one statement and refused against the next.
+ * - The matcher is reached through `find`, which stops at the first rule that
+ *   matches. A malformed rule behind a rule that matched was never evaluated,
+ *   so moving it up the list turned a clean run into an error.
+ * - `directionAllows` is checked before the matcher, so a malformed rule
+ *   restricted to one direction was invisible to a statement that ran the
+ *   other way.
+ *
+ * Checking the rules once, up front, removes all three: a rules file is either
+ * usable or it is not, and the statement has no say in it. `matches` below is
+ * now a predicate and nothing more.
+ */
+export function checkRule(rule: PostingRule): void {
+  compileRule(rule);
+}
+
+/**
+ * The checks, and the compiled pattern they produce.
+ *
+ * One function rather than a validator beside a compiler, because compiling
+ * the pattern *is* the check that it is usable — and doing both separately
+ * compiled every regex twice, which a count of the constructor caught.
+ */
+function compileRule(rule: PostingRule): CompiledRule {
+  if ((rule.action ?? "book") === "book" && rule.account === undefined) {
+    throw new PostingRuleError(`Rule ${rule.id} books something but names no account`);
+  }
   const test = rule.match;
+  if (test.all === undefined && test.any === undefined && test.regex === undefined) {
+    // A rule with only a `none` clause would match everything that is not
+    // excluded, which is never what anybody means.
+    throw new PostingRuleError(`Rule ${rule.id} matches on nothing`);
+  }
+  if (test.regex === undefined) return { rule, pattern: null };
+  try {
+    return { rule, pattern: new RegExp(test.regex, "i") };
+  } catch (error) {
+    throw new PostingRuleError(
+      `Rule ${rule.id} has an unusable regex: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+}
+
+/** Every rule, in order, so the first unusable one names itself. */
+export function checkRules(rules: readonly PostingRule[]): void {
+  for (const rule of rules) checkRule(rule);
+}
+
+/**
+ * A rule with its regex compiled.
+ *
+ * Compiled once per set rather than once per line per rule: the pattern cannot
+ * change between lines, and building it inside the matcher was the reason an
+ * unusable one could only be discovered by running into it.
+ */
+interface CompiledRule {
+  readonly rule: PostingRule;
+  readonly pattern: RegExp | null;
+}
+
+function compile(rules: readonly PostingRule[]): readonly CompiledRule[] {
+  return rules.map(compileRule);
+}
+
+function matches(candidate: CompiledRule, line: StatementLine): boolean {
+  const text = line.normalisedDescription;
+  const test = candidate.rule.match;
 
   if (test.none !== undefined && test.none.some((token) => text.includes(token.toUpperCase()))) {
     return false;
@@ -276,22 +350,7 @@ function matches(rule: PostingRule, line: StatementLine): boolean {
   if (test.any !== undefined && !test.any.some((token) => text.includes(token.toUpperCase()))) {
     return false;
   }
-  if (test.regex !== undefined) {
-    let pattern: RegExp;
-    try {
-      pattern = new RegExp(test.regex, "i");
-    } catch (error) {
-      throw new PostingRuleError(
-        `Rule ${rule.id} has an unusable regex: ${error instanceof Error ? error.message : String(error)}`,
-      );
-    }
-    if (!pattern.test(text)) return false;
-  }
-  if (test.all === undefined && test.any === undefined && test.regex === undefined) {
-    // A rule with only a `none` clause would match everything that is not
-    // excluded, which is never what anybody means.
-    throw new PostingRuleError(`Rule ${rule.id} matches on nothing`);
-  }
+  if (candidate.pattern !== null && !candidate.pattern.test(text)) return false;
   return true;
 }
 
@@ -370,17 +429,18 @@ export function proposeEntries(
   const prefix = options.idPrefix ?? DEFAULT_PREFIX;
   const tags = options.tags ?? ["bank-import"];
 
-  for (const rule of rules) {
-    if ((rule.action ?? "book") === "book" && rule.account === undefined) {
-      throw new PostingRuleError(`Rule ${rule.id} books something but names no account`);
-    }
-  }
+  // Every rule, before the first line is read. The account check was already
+  // here; the other two had been left inside the matcher, where they could
+  // only fire for a rule some line happened to reach.
+  const compiled = compile(rules);
 
   const proposals: Proposal[] = [];
 
   for (const line of lines) {
     const direction = directionOf(line);
-    const rule = rules.find((candidate) => directionAllows(candidate, direction) && matches(candidate, line));
+    const rule = compiled.find(
+      (candidate) => directionAllows(candidate.rule, direction) && matches(candidate, line),
+    )?.rule;
 
     if (rule !== undefined && (rule.action ?? "book") === "skip") {
       proposals.push(
@@ -563,7 +623,7 @@ export function parseRules(text: string): readonly PostingRule[] {
         throw new PostingRuleError(`Rule ${id} has a match.regex that is not a string`);
       }
 
-      return Object.freeze({
+      const rule: PostingRule = Object.freeze({
         id,
         describe: typeof raw["describe"] === "string" ? raw["describe"] : id,
         match: Object.freeze({ ...(match as RuleMatch) }),
@@ -572,6 +632,13 @@ export function parseRules(text: string): readonly PostingRule[] {
         ...(typeof raw["account"] === "string" ? { account: raw["account"] } : {}),
         ...(typeof raw["narration"] === "string" ? { narration: raw["narration"] } : {}),
       });
+
+      // The shape checks above are about the JSON; this one is about the rule.
+      // Reading a file used to accept a rule that no statement could ever use
+      // safely, and left the complaint to whichever run first met a line that
+      // reached it.
+      checkRule(rule);
+      return rule;
     }),
   );
 }
