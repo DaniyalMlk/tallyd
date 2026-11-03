@@ -113,6 +113,23 @@ export function importCsv(input: string, options: ImportOptions = {}): ImportRes
         `assuming '${decimal === "dot" ? "." : ","}'.`,
     );
   }
+  if (
+    options.decimal !== undefined &&
+    decimalDetection.confident &&
+    decimalDetection.convention !== options.decimal &&
+    amountSamples.length > 0
+  ) {
+    // The override wins — it is an override — but it is worth saying when it
+    // contradicts a column the reader was sure about, because the two
+    // conventions differ by a factor of a hundred and the result parses
+    // cleanly either way. `-123,45` read as dots is `-12345.00`, with no
+    // error anywhere to show for it.
+    warnings.push(
+      `Amounts look like they use '${decimalDetection.convention === "dot" ? "." : ","}' ` +
+        `as the decimal separator, but '${options.decimal === "dot" ? "." : ","}' was asked for; ` +
+        `reading them as asked.`,
+    );
+  }
 
   const amountOptions: ParseAmountOptions = {
     convention: decimal,
