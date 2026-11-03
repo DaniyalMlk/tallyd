@@ -19,10 +19,55 @@
 import type { SeriesPoint } from "./model.js";
 
 export interface ChartOptions {
+  /** Outside width in user units. Must leave room for the axis gutter. */
   readonly width?: number;
+  /** Outside height in user units. Must leave room for the date labels. */
   readonly height?: number;
   readonly exponent: number;
   readonly symbol: string;
+}
+
+/** A chart that cannot be drawn at the size it was asked for. */
+export class ChartSizeError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ChartSizeError";
+  }
+}
+
+/**
+ * The plot area, or a refusal.
+ *
+ * The padding is fixed — the axis labels and the dates need the room whatever
+ * the chart's outside size — so a width below the gutters leaves a negative
+ * plot, and a negative plot does not draw a smaller chart. It draws a broken
+ * one: the series runs right to left, the hit rectangles carry negative
+ * widths, and at a non-positive width the `viewBox` itself goes negative,
+ * which is invalid and makes a browser decline the whole element.
+ *
+ * None of that is worth rendering, so it is refused with the size that would
+ * have worked.
+ */
+function plotArea(
+  width: number,
+  height: number,
+  padding: { left: number; right: number; top: number; bottom: number },
+): { plotWidth: number; plotHeight: number } {
+  const plotWidth = width - padding.left - padding.right;
+  const plotHeight = height - padding.top - padding.bottom;
+  if (plotWidth <= 0) {
+    throw new ChartSizeError(
+      `A width of ${width} leaves no room to plot in: the axis gutter and margin ` +
+        `take ${padding.left + padding.right}, so the width has to exceed that.`,
+    );
+  }
+  if (plotHeight <= 0) {
+    throw new ChartSizeError(
+      `A height of ${height} leaves no room to plot in: the top margin and the date ` +
+        `labels take ${padding.top + padding.bottom}, so the height has to exceed that.`,
+    );
+  }
+  return { plotWidth, plotHeight };
 }
 
 const escapeAttribute = (value: string): string =>
@@ -84,6 +129,16 @@ export function cashPositionChart(
   const padTop = 12;
   const padBottom = 26;
 
+  // Before the empty case, not after it. A size that cannot be drawn is a
+  // property of the request and not of the data, so the answer should not
+  // depend on whether this account happened to have any movements.
+  const { plotWidth, plotHeight } = plotArea(width, height, {
+    left: padLeft,
+    right: padRight,
+    top: padTop,
+    bottom: padBottom,
+  });
+
   if (points.length === 0) {
     return `<div class="empty"><strong>No movements</strong>Nothing has been posted to this account in the period.</div>`;
   }
@@ -92,9 +147,6 @@ export function cashPositionChart(
   const ticks = niceTicks(Math.min(0, ...values), Math.max(0, ...values));
   const low = Math.min(...ticks);
   const high = Math.max(...ticks);
-
-  const plotWidth = width - padLeft - padRight;
-  const plotHeight = height - padTop - padBottom;
 
   // Position by date, not by index. Spacing ten movements evenly across a
   // month draws three days and thirteen days the same width, which is a lie
@@ -193,13 +245,23 @@ export function confidenceChart(
   const countWidth = 28;
   const height = bands.length * rowHeight;
 
+  // The same arithmetic as the line chart and so the same guard: the label
+  // and the count take fixed room, and a bar length below zero is not a
+  // shorter bar. Only the width is an option here — the height follows from
+  // the number of bands — so there is one dimension to check.
+  const { plotWidth: barWidth } = plotArea(width, rowHeight, {
+    left: labelWidth,
+    right: countWidth,
+    top: 0,
+    bottom: 0,
+  });
+
   const total = bands.reduce((sum, band) => sum + band.count, 0);
   if (total === 0) {
     return `<div class="empty"><strong>Nothing matched</strong>No pair scored high enough to appear.</div>`;
   }
 
   const most = Math.max(...bands.map((band) => band.count));
-  const barWidth = width - labelWidth - countWidth;
 
   const rows = bands
     .map((band, index) => {
