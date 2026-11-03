@@ -403,143 +403,148 @@ all disagree slightly.
 | `docs/site.ts` | The front page, rendered from the evidence gate and the chart |
 | `docs/dashboard.ts` | The published dashboard, built from a fixed sample of generated books |
 
-2183 tests across 96 files, typecheck clean.
+2188 tests across 97 files, typecheck clean.
 
 ## Known gaps
 
-- Nothing recomputes the suite size on the line above it, so it is a number
-  that goes stale quietly; `tests/docs.test.ts` now checks the file count
-  exactly and the test count loosely, which is the best a count of tests can do
-  from inside the suite it is counting.
-- The classification rules are a starting point and not a claim about anybody's
-  business. They are written against the standard chart, in English, for a UK
-  bank's descriptors; a different chart needs `--rules` and a different country
-  needs most of them rewritten.
-- A statement line the matcher merely failed to match looks exactly like a line
-  the books are missing. `post` only proposes for lines with no suggestion at
-  all, and a reviewer's rejection is applied directly rather than through the
-  score — but `--suspense` will still book a missed match if one gets that far,
-  and the command can only warn about it.
-- Nothing learns from a classification. A reviewer who moves an entry from the
-  suspense account to 5400 has stated a fact as useful as a confirmed match,
-  and it goes nowhere: there is no equivalent of the counterparty memory for
-  accounts.
-- Proposed entries carry no VAT treatment. A gross bank charge is booked gross,
-  which is right for that charge and wrong for most purchases.
-- The dashboard embeds every posting in the file. At a year of a busy account
-  that is a large page to open.
-- The CLI reads a whole ledger into memory on every invocation. Fine for a
-  year of a small company, wrong for anything larger.
-- Ageing groups by reference alone, so an invoice and its credit note only
-  net off when they share one. There is no counterparty dimension yet.
-- The dashboard knows nothing about foreign currency. It reconciles one bank
-  account in one currency, which is right for what it does, but there is no
-  view of what is exposed and no way to work through a revaluation in it.
-- Translation restates the trial balance. The income statement and balance
-  sheet renderers still read the functional-currency figures, so `--present`
-  prints a translated trial balance beside them rather than a translated set
-  of statements.
-- The translation adjustment is computed and shown but never posted. There is
-  no reserve account for it and no entry, so a translated balance sheet cannot
-  be loaded back in as a ledger.
-- A statement in a foreign currency cannot be reconciled. The matcher compares
-  amounts in one currency, so a euro bank account needs its own reconciliation
-  against a euro statement — which works, but nothing bridges the two.
-- The revaluation reads the whole ledger to find its open items, once per run.
+- **The classification rules are a starting point, not a claim about anybody's business.**
+  They are written against the standard chart, in English, for a UK bank's
+  descriptors; a different chart needs `--rules` and a different country needs
+  most of them rewritten.
+- **A line the matcher merely failed to match looks exactly like a line the books are missing.**
+  `post` only proposes for lines with no suggestion at all, and a reviewer's
+  rejection is applied directly rather than through the score — but
+  `--suspense` will still book a missed match if one gets that far, and the
+  command can only warn about it.
+- **Nothing learns from a classification.**
+  A reviewer who moves an entry from the suspense account to 5400 has stated a
+  fact as useful as a confirmed match, and it goes nowhere: there is no
+  equivalent of the counterparty memory for accounts.
+- **Proposed entries carry no VAT treatment.**
+  A gross bank charge is booked gross, which is right for that charge and wrong
+  for most purchases.
+- **The dashboard embeds every posting in the file.**
+  At a year of a busy account the published file runs to 927 KB, and nothing
+  pages or defers any of it. That is not an oversight so much as the cost of
+  the file's one claim: it opens from a file path on a machine with no network,
+  which is exactly what rules out fetching the rest on demand.
+- **The CLI reads a whole ledger into memory on every invocation.**
+  Fine for a year of a small company and wrong for anything larger. Every
+  command pays the whole read, so a sequence of them pays it once each, and
+  there is no index or digest to read in place of the entries.
+- **Ageing groups by reference alone.**
+  An invoice and its credit note only net off when they share a reference, so a
+  customer who quotes a different one on the credit leaves both sitting in the
+  ageing at their full amounts. There is no counterparty dimension yet.
+- **The dashboard knows nothing about foreign currency.**
+  It reconciles one bank account in one currency, which is right for what it
+  does, but there is no view of what is exposed and no way to work through a
+  revaluation in it.
+- **Translation restates the trial balance, not the statements.**
+  The income statement and balance sheet renderers still read the functional-
+  currency figures, so `--present` prints a translated trial balance beside
+  them rather than a translated set of statements.
+- **A statement in a foreign currency cannot be reconciled.**
+  The matcher compares amounts in one currency, so a euro bank account needs
+  its own reconciliation against a euro statement — which works, but nothing
+  bridges the two.
+- **The revaluation reads the whole ledger to find its open items, once per run.**
   Fine at a year of a small company, wrong for anything that has to close in
-  seconds.
-- Memory is keyed on the counterparty name and nothing else. Two suppliers whose
-  names normalise to the same tokens share one entry, and a business that renames
-  itself starts again from nothing.
-- Memory never ages. A pairing confirmed once three years ago counts exactly as
-  much as one confirmed last month, and `lastSeen` is recorded but not yet used
-  to decay anything.
-- Group matching is capped at four lines a side and, by design, never mixes
-  directions, so a batch that is itself paid in two instalments is out of reach.
-- The generator models one business shape — a small services company with
-  invoices, a supplier run, card takings and payroll. It says nothing about
-  books with foreign currency, intercompany transfers or a credit-card control
-  account, so the benchmark numbers describe that shape and not every shape.
-- Unrealised profit on goods one group company has sold to another and which
-  are still in stock is not eliminated. The trading is taken out and the margin
-  sitting inside the buyer's inventory is not, so consolidated stock is carried
-  at what the group charged itself rather than at what it cost.
-- An associate is identified and then left alone. It is neither consolidated nor
-  equity accounted, so a 30% holding shows in the group's books at whatever the
-  investment cost and nothing of its results reaches the consolidated income
-  statement.
-- An impairment is declared, never computed. The group says what goodwill is
-  worth less by; nothing compares a carrying amount with a recoverable one,
-  because a recoverable amount is a forecast and this engine does not hold
-  forecasts. What follows from an impairment is modelled; deciding there should
-  be one is not.
-- Where the outside stake was measured proportionately, the standard grosses up
-  a partly-recognised impairment to compare it with the recoverable amount, and
-  that gross-up is not modelled. The recognised loss is the group's own, which
-  is right, but a declared write-off larger than the stake's attributed
-  goodwill is refused rather than grossed up — a refusal with a reason rather
-  than a guess, and a gap all the same.
-- Fair value adjustments on acquisition can only be given as a single figure for
-  the net assets acquired. There is no way to say which asset was written up, so
-  nothing depreciates the uplift afterwards.
-- Indirect holdings use the direct method: goodwill on a company held through a
-  subsidiary is measured against what the subsidiary paid, in full. The
-  alternative treatment, which scales that cost by the group's interest in the
-  buyer, is not available.
-- Nothing verifies that an entity's books were closed at the start of the
-  reporting period. Where they were not, and no acquisition date falls inside
-  the period to give the consolidation a reason to close them, the result is
-  overstated and nothing says so.
-- The translation reserve is not recycled on the sale of a foreign operation.
-  The cumulative exchange differences on it should come out of reserves and into
-  the gain, and *cumulative* is the word: the consolidation measures one
-  period's translation adjustment and has never carried the running total, which
-  is a fact about several previous years of rates that no single reporting date
-  supplies. Goodwill's own exchange difference is the exception and is not an
-  answer to the rest of it: that one *is* cumulative, because it is measured
-  against the acquisition-date figure rather than against last period's, so it
-  is known at any single date. It is still left in the reserve rather than
-  recycled, for the same reason as the rest.
-- A partial disposal cannot be expressed. Selling 80% down to 30% loses control
-  and leaves a holding; selling down to 60% loses nothing and is a transaction
-  between owners rather than a disposal at all. Both need the retained interest
-  measured at fair value, which is a figure only the group has, and neither is
-  the same entry as walking away entirely.
-- The proceeds a disposal declares and the proceeds the holder's own books
-  recorded are checked against each other only after the fact. The difference is
-  reported as `disposalResidual` and named on the face of the workings, which is
-  better than absorbing it, but nothing refuses the consolidation: a set of
-  accounts describing the same sale two ways still balances and still runs.
-- A disposal assumes the holder has already derecognised the investment in its
-  own books. Where it has not, the entry puts back an investment that was never
-  taken off and the surplus shows up in `investmentResidual` — flagged, but
-  flagged rather than prevented.
-- The movement schedules name the outside stake's removal on a disposal and stop
-  there. Goodwill and the group's own reserves get a comparative column and an
-  arithmetic movement across a sale, and no schedule saying which part of it was
-  the disposal.
-- Books that have never been closed to reserves still hand the group every
-  year's profit at once. `withResultClosed` will fix them and the caller has to
-  ask: without an acquisition date inside the period there is nothing to tell
-  the consolidation that a period boundary is missing, and guessing at one
-  would be worse than the gap.
-- The pre-acquisition result is computed and reported but never translated. It
-  is shown in the entity's own currency, which is honest, and a reader
+  seconds. The open items are found by walking every entry in the ledger, once
+  per run, and nothing is kept between runs.
+- **Memory is keyed on the counterparty name and nothing else.**
+  Two suppliers whose names normalise to the same tokens share one entry, and a
+  business that renames itself starts again from nothing.
+- **Memory never ages.**
+  A pairing confirmed once three years ago counts exactly as much as one
+  confirmed last month, and `lastSeen` is recorded but not yet used to decay
+  anything.
+- **Group matching is capped at four lines a side and never mixes directions.**
+  Never mixing directions is deliberate — interest earned and interest paid are
+  the same word in a bank's descriptors. The cap of four is not: a batch that
+  is itself paid in two instalments is out of reach, and the number is where it
+  is because the search over a component grows with it.
+- **The generator models one business shape.**
+  It says nothing about books with foreign currency, intercompany transfers or
+  a credit-card control account, so the benchmark numbers describe that shape
+  and not every shape.
+- **An associate is identified and then left alone.**
+  It is neither consolidated nor equity accounted, so a 30% holding shows in
+  the group's books at whatever the investment cost and nothing of its results
+  reaches the consolidated income statement.
+- **An impairment is declared, never computed.**
+  The group says what goodwill is worth less by; nothing compares a carrying
+  amount with a recoverable one, because a recoverable amount is a forecast and
+  this engine does not hold forecasts. What follows from an impairment is
+  modelled; deciding there should be one is not.
+- **A partly-recognised impairment is not grossed up where the outside stake was measured proportionately.**
+  The recognised loss is the group's own, which is right, but a declared write-
+  off larger than the stake's attributed goodwill is refused rather than
+  grossed up — a refusal with a reason rather than a guess, and a gap all the
+  same.
+- **Fair value adjustments can only be given as a single figure for the net assets acquired.**
+  There is no way to say which asset was written up, so nothing depreciates the
+  uplift afterwards.
+- **Indirect holdings use the direct method.**
+  The alternative treatment, which scales that cost by the group's interest in
+  the buyer, is not available.
+- **Nothing verifies that an entity's books were closed at the start of the reporting period.**
+  Where they were not, and no acquisition date falls inside the period to give
+  the consolidation a reason to close them, the result is overstated and
+  nothing says so.
+- **The translation reserve is not recycled on the sale of a foreign operation.**
+  The cumulative exchange differences on it should come out of reserves and
+  into the gain, and *cumulative* is the word: the consolidation measures one
+  period's translation adjustment and has never carried the running total,
+  which is a fact about several previous years of rates that no single
+  reporting date supplies. Goodwill's own exchange difference is the exception
+  and is not an answer to the rest of it: that one *is* cumulative, because it
+  is measured against the acquisition-date figure rather than against last
+  period's, so it is known at any single date. It is still left in the reserve
+  rather than recycled, for the same reason as the rest.
+- **A partial disposal cannot be expressed.**
+  Selling 80% down to 30% loses control and leaves a holding; selling down to
+  60% loses nothing and is a transaction between owners rather than a disposal
+  at all. Both need the retained interest measured at fair value, which is a
+  figure only the group has, and neither is the same entry as walking away
+  entirely.
+- **A disposal's declared proceeds and the holder's own books are reconciled only after the fact.**
+  The difference is reported as `disposalResidual` and named on the face of the
+  workings, which is better than absorbing it, but nothing refuses the
+  consolidation: a set of accounts describing the same sale two ways still
+  balances and still runs.
+- **A disposal assumes the holder has already derecognised the investment.**
+  Where it has not, the entry puts back an investment that was never taken off
+  and the surplus shows up in `investmentResidual` — flagged, but flagged
+  rather than prevented.
+- **The movement schedules name the outside stake's removal on a disposal and stop there.**
+  Goodwill and the group's own reserves get a comparative column and an
+  arithmetic movement across a sale, and no schedule saying which part of it
+  was the disposal.
+- **Books that have never been closed to reserves hand the group every year's profit at once.**
+  `withResultClosed` will fix them and the caller has to ask: without an
+  acquisition date inside the period there is nothing to tell the consolidation
+  that a period boundary is missing, and guessing at one would be worse than
+  the gap.
+- **The pre-acquisition result is computed and reported but never translated.**
+  It is shown in the entity's own currency, which is honest, and a reader
   comparing it with the presentation-currency figures beside it has to do the
   conversion themselves. The rate is not what is missing: the natural one is
   the average over the months before control was obtained, and the
   consolidation now takes exactly that kind of average for the other half of
   the year.
-- The movement schedules explain the outside stake, the translation reserve and
-  goodwill, and nothing else. The group's own reserves and the individual lines
-  of the balance sheet get a comparative column and a movement, which is the
-  arithmetic, but no schedule saying what the movement was made of. Reserves
-  are the conspicuous one: a reader who wants to know how much of the movement
-  was this year's result and how much was a prior-year adjustment has to work
-  it out from the three schedules that do exist.
-- The dashboard knows nothing about groups. It reconciles one bank account for
-  one company, which is what it is for, but there is no view of a consolidation.
-- The matcher still holds both sides in memory. A year of a busy account
-  reconciles in about a fifth of a second, but books where hundreds of movements
-  share one amount and one date collapse into a single graph component and get
-  the dense solve, which is cubic. Nothing streams; nothing is incremental.
+- **The movement schedules explain three things and nothing else.**
+  The group's own reserves and the individual lines of the balance sheet get a
+  comparative column and a movement, which is the arithmetic, but no schedule
+  saying what the movement was made of. Reserves are the conspicuous one: a
+  reader who wants to know how much of the movement was this year's result and
+  how much was a prior-year adjustment has to work it out from the three
+  schedules that do exist.
+- **The dashboard knows nothing about groups.**
+  It reconciles one bank account for one company, which is what it is for, but
+  there is no view of a consolidation.
+- **The matcher still holds both sides in memory.**
+  A year of a busy account reconciles in about a fifth of a second, but books
+  where hundreds of movements share one amount and one date collapse into a
+  single graph component and get the dense solve, which is cubic. Nothing
+  streams; nothing is incremental.
