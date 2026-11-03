@@ -59,10 +59,61 @@ export interface BalanceSheetOptions {
   /** Include accounts whose balance is zero. Off by default. */
   includeZero?: boolean;
   /**
-   * Where the period result is posted. Defaults to `"3200"` when the chart
-   * has it, otherwise the line stands alone under equity.
+   * Which equity account the period result is attributed to.
+   *
+   * Left out, the line carries no account code, and that is the right default
+   * rather than a missing one: nothing has been closed out, so the result is
+   * not sitting in retained earnings — which is exactly what the footnote
+   * under the rendered report says. An earlier version of this comment
+   * promised a default of `"3200"` when the chart held it. That default was
+   * never implemented, and implementing it would have made the report
+   * contradict its own footnote.
+   *
+   * Naming an account is therefore a claim about where the result belongs,
+   * made by a caller who knows something the ledger does not. It must be an
+   * equity account the chart holds. It need not be postable: nothing is
+   * posted here, and a placeholder reserve is a reasonable thing to attribute
+   * a result to.
    */
   retainedEarningsAccount?: string;
+}
+
+/** A balance sheet that cannot be drawn as asked. */
+export class BalanceSheetError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "BalanceSheetError";
+  }
+}
+
+/**
+ * The code to put on the result line, checked against the chart.
+ *
+ * Unchecked, this option would print any string under Equity. A fixed-asset
+ * code gave `1210  Result for the period` in the equity section of a report
+ * that still said it balanced, and a code belonging to no account at all was
+ * accepted just as quietly. Neither is a sheet anybody should be handed.
+ */
+function attributedAccount(ledger: Ledger, code: string | undefined): string {
+  if (code === undefined) return "";
+  const chart = ledger.chart;
+  // A ledger carrying no chart has nothing to check against. Taking the
+  // caller's word is the only option; refusing would make the check depend on
+  // whether a chart happened to be supplied.
+  if (chart === undefined) return code;
+  const account = chart.find(code);
+  if (account === undefined) {
+    throw new BalanceSheetError(
+      `Cannot attribute the period result to ${code}: the chart has no such account`,
+    );
+  }
+  if (account.type !== "equity") {
+    throw new BalanceSheetError(
+      `Cannot attribute the period result to ${code} (${account.name}): it is ` +
+        `${account.type === "asset" || account.type === "income" ? "an" : "a"} ${account.type} account, not equity`,
+    );
+  }
+  return code;
 }
 
 const EPOCH_START = "0001-01-01";
@@ -119,7 +170,7 @@ export function balanceSheet(
   const equityRows: BalanceSheetRow[] = [
     ...bookedEquity.rows,
     Object.freeze({
-      account: options.retainedEarningsAccount ?? "",
+      account: attributedAccount(ledger, options.retainedEarningsAccount),
       name: resultForPeriod.isNegative ? "Loss for the period" : "Result for the period",
       amount: resultForPeriod,
       synthetic: true,
