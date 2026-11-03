@@ -20,6 +20,7 @@ export {
   type BalanceSheetRow,
   type BalanceSheetSection,
   type BalanceSheetOptions,
+  BalanceSheetError,
   balanceSheet,
   renderBalanceSheet,
 } from "./balanceSheet.js";
