@@ -403,7 +403,7 @@ all disagree slightly.
 | `docs/site.ts` | The front page, rendered from the evidence gate and the chart |
 | `docs/dashboard.ts` | The published dashboard, built from a fixed sample of generated books |
 
-2170 tests across 94 files, typecheck clean.
+2183 tests across 96 files, typecheck clean.
 
 ## Known gaps
 
