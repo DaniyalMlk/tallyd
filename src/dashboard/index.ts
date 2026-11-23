@@ -7,6 +7,7 @@ export {
   type SeriesPoint,
   type DashboardData,
   type DashboardInput,
+  type ImpliedEntryView,
   dashboardData,
 } from "./model.js";
 
