@@ -318,6 +318,26 @@ all disagree slightly.
       build found two more faults: two column rails that agreed at every width
       except the widest, and a footer whose own padding ate its measure.
 
+- [x] **23 — Every type a caller has to write can be named.** Five types sat
+      in the signatures of things the package exports without being exported
+      themselves, so a caller could receive them or have to construct them and
+      could not write their names: `GoodwillImpairment`, the element type of a
+      field of `ConsolidationOptions` and `DisposalOptions`, which anyone
+      declaring an impairment builds by hand; `GoodwillCarrying`,
+      `AcquiredAmount` and `DisposalWorking` inside the acquisition, disposal
+      and consolidation results; and `ImpliedEntryView` inside the dashboard's
+      data. The manifest's `exports` map closes the deep import that would have
+      been the workaround. All five now leave through their barrels, and a gate
+      walks every root export's declaration (signatures, fields, aliases,
+      annotations, `extends` and `implements`, but not bodies, initialisers or
+      private members) and fails on any type from `src/` it mentions that the
+      root does not export. Its twenty-four rules are tested against source
+      written for each. The same change makes `build` start from an empty
+      `dist`: `tsc` removes nothing it has stopped emitting, so a `.js`
+      planted by hand in `dist/ledger/` reached `npm pack` even though
+      `prepack` rebuilt first, and the packaging test now fails on any shipped
+      output with no source behind it.
+
 ## Current state
 
 | Module | What it does |
@@ -403,7 +423,7 @@ all disagree slightly.
 | `docs/site.ts` | The front page, rendered from the evidence gate and the chart |
 | `docs/dashboard.ts` | The published dashboard, built from a fixed sample of generated books |
 
-2188 tests across 97 files, typecheck clean.
+2215 tests across 98 files, typecheck clean.
 
 ## Known gaps
 

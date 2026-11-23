@@ -11,9 +11,12 @@ export {
 } from "./structure.js";
 export { CONSOLIDATION_ACCOUNTS, GROUP_ACCOUNTS, groupChart } from "./accounts.js";
 export {
+  type AcquiredAmount,
   type Acquisition,
   type AcquisitionInput,
   type AcquisitionOptions,
+  type GoodwillCarrying,
+  type GoodwillImpairment,
   type NciMeasurement,
   acquisitionOf,
   acquisitions,
@@ -31,6 +34,7 @@ export {
 export {
   type Consolidation,
   type ConsolidationOptions,
+  type DisposalWorking,
   type SubsidiaryWorking,
   consolidate,
   renderConsolidation,

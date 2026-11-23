@@ -16,7 +16,7 @@
  */
 
 import { execFileSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -74,7 +74,19 @@ describe("the manifest", () => {
     // which is how the missing shebang reached an installed tarball while
     // the local build that was tested predated it.
     expect(manifest.scripts["prepack"]).toBe("npm run build");
-    expect(manifest.scripts["build"]).toBe("tsc -p tsconfig.build.json");
+    expect(manifest.scripts["build"]).toMatch(/&& tsc -p tsconfig\.build\.json$/);
+  });
+
+  it("ships no output whose source has gone", () => {
+    // Building before packing was not enough on its own: `tsc` writes what it
+    // emits and removes nothing, so a module renamed or deleted in src/ left
+    // its old .js and .d.ts in dist/ beside the new ones, and `files: ["dist"]`
+    // sent both. Asserted on the tarball's contents, not on the script.
+    const orphans = [...shipped]
+      .filter((path) => path.startsWith("dist/") && /\.(d\.ts|js)$/.test(path))
+      .map((path) => path.replace(/^dist\//, "src/").replace(/(\.d)?\.js$|\.d\.ts$/, ".ts"))
+      .filter((source) => !existsSync(resolve(root, source)));
+    expect(orphans).toEqual([]);
   });
 
   it("points the repository at this repository, exactly", () => {
