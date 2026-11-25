@@ -78,7 +78,7 @@ jobs:
           npm --version
       - name: Install
         run: npm ci
-      # prepack builds, so the published tarball is built here rather than
+      # prepare builds, so the published tarball is built here rather than
       # being whatever a working copy had in dist.
       - name: Publish
         run: npm publish

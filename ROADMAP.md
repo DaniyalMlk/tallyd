@@ -338,6 +338,24 @@ all disagree slightly.
       `prepack` rebuilt first, and the packaging test now fails on any shipped
       output with no source behind it.
 
+- [x] **24 — Installed from wherever a reader starts.** Three ways in, each
+      broken differently. A git dependency (`npm install
+      github:DaniyalMlk/tallyd`) installed the manifest, the readme and the
+      licence and nothing to run, because npm builds one by running `prepare`
+      in a clone and the manifest only built on `prepack`; `prepare` runs on
+      `npm pack` as well, so it replaces `prepack` and the packaging tests
+      still describe a fresh build. The first line of the site's first minute,
+      `tallyd generate --out books`, failed with ENOENT on a real disk, in the
+      published `0.1.0` too, because nothing created `books`; every CLI test
+      ran against an in-memory environment that accepts any path. The real
+      filesystem moves into `src/cli/environment.ts`, whose `writeFile`
+      creates the directory first, for all six commands that write, and a test
+      drives that environment in an empty temporary directory with the commands
+      read off the page that prints them. And the site said the registry line
+      did not work yet, when `0.1.0` had been on npm since 27 October. CI now
+      installs through the git-dependency path and runs the first minute as
+      printed.
+
 ## Current state
 
 | Module | What it does |
@@ -377,6 +395,7 @@ all disagree slightly.
 | `src/reports/ageing.ts` | Open items and ageing buckets |
 | `src/cli/args.ts` | Argument parsing, written rather than installed |
 | `src/cli/run.ts` | The five commands, as a pure function |
+| `src/cli/environment.ts` | The real filesystem and clock the executable runs against |
 | `src/demo/receivables.ts` | A quarter of sales with a real ageing profile |
 | `src/demo/statements.ts` | All four statements over that quarter |
 | `src/dashboard/model.ts` | The reconciliation flattened for the browser |
@@ -423,7 +442,7 @@ all disagree slightly.
 | `docs/site.ts` | The front page, rendered from the evidence gate and the chart |
 | `docs/dashboard.ts` | The published dashboard, built from a fixed sample of generated books |
 
-2215 tests across 98 files, typecheck clean.
+2226 tests across 99 files, typecheck clean.
 
 ## Known gaps
 

@@ -10,7 +10,7 @@
  * handed to the shell rather than to node.
  *
  * So these tests read the manifest and ask `npm pack` what the tarball
- * contains. `npm pack --dry-run` runs the `prepack` hook, which means the
+ * contains. `npm pack --dry-run` runs the `prepare` hook, which means the
  * answers are about a freshly built `dist` rather than whatever happened to
  * be lying around.
  */
@@ -73,8 +73,18 @@ describe("the manifest", () => {
     // prepublishOnly would leave `npm pack` free to tar up a stale dist,
     // which is how the missing shebang reached an installed tarball while
     // the local build that was tested predated it.
-    expect(manifest.scripts["prepack"]).toBe("npm run build");
+    expect(manifest.scripts["prepare"]).toBe("npm run build");
     expect(manifest.scripts["build"]).toMatch(/&& tsc -p tsconfig\.build\.json$/);
+  });
+
+  it("builds when it is installed from the repository, not only when it is packed", () => {
+    // npm builds a git dependency by running `prepare` in a clone and packing
+    // the result. `prepack` alone is never run on that path, so
+    // `npm install github:DaniyalMlk/tallyd` installed the manifest, the
+    // readme and the licence, and no dist. `prepare` also runs on `npm pack`,
+    // so one hook covers both, and a second would build twice.
+    expect(manifest.scripts["prepack"]).toBeUndefined();
+    expect(manifest.scripts["prepublishOnly"]).toBeUndefined();
   });
 
   it("ships no output whose source has gone", () => {

@@ -102,3 +102,18 @@ jobs:
           ./node_modules/.bin/tallyd reconcile --ledger /tmp/book/books.json \
             --statement /tmp/book/statement.csv --account 1110 > /dev/null
           echo "the installed package imports, generates, reports and reconciles"
+      # A git dependency is a third way in, and a different one: npm clones
+      # the repository, runs `prepare` there and packs the result, so a
+      # manifest that only builds on `prepack` installs with no dist at all.
+      # The commands are the site's first minute as printed, from an empty
+      # directory, which is where a reader starts.
+      - name: Install from the repository as a git dependency and run the first minute
+        run: |
+          mkdir -p /tmp/from-git && cd /tmp/from-git
+          npm init -y > /dev/null
+          npm install "git+file://$GITHUB_WORKSPACE#$GITHUB_SHA"
+          test -f node_modules/tallyd/dist/index.js
+          npx tallyd generate --out books > /dev/null
+          npx tallyd dashboard -l books/books.json -s books/statement.csv -a 1110 -o review.html
+          test -s review.html
+          echo "a git install builds, and the first minute runs from an empty directory"

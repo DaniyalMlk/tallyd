@@ -271,10 +271,10 @@ npx ${esc(PACKAGE)} dashboard -l books/books.json -s books/statement.csv -a 1110
   package ships compiled JavaScript and type declarations, exports
   ${size.exports} names, and has no runtime dependencies.</p>
   <pre><code>import { Ledger, standardChart, consolidate } from "${esc(PACKAGE)}";</code></pre>
-  <p class="aside">Until the trusted publisher is registered on the registry,
-  the install line is the one thing on this page that does not work yet, and it
-  installs from source in the meantime:
-  ${code("`git clone " + SOURCE + ".git && npm ci`")}.</p>
+  <p class="aside">That is the release on the registry. To follow the
+  repository instead, ${code("`npm install github:DaniyalMlk/" + PACKAGE + "`")}
+  installs it as a dependency and builds it on the way in; the commands above
+  then work the same.</p>
 </section>
 
 <section class="covers col">
