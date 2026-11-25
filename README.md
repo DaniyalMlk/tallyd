@@ -73,7 +73,7 @@ would hold no matter what the engine did with it.
 npm run demo:evidence     # all six, non-zero if a figure moves
 ```
 
-Behind them: 1,984 tests on Node 20.19, 22 and 24, including property-based
+Behind them: 2,226 tests on Node 20.19, 22 and 24, including property-based
 sweeps over the ledger and the money type — 2,000 random entries cannot
 unbalance the ledger, and `split(n)` conserves every minor unit across 20,000
 random allocations.
@@ -127,6 +127,13 @@ The command line comes with it:
 npx tallyd --help
 ```
 
+That is the release on npm. To follow the repository instead, install it from
+GitHub; npm builds it on the way in:
+
+```bash
+npm install github:DaniyalMlk/tallyd
+```
+
 Node 20.19 or newer. The package ships compiled JavaScript and type
 declarations and has no runtime dependencies.
 
@@ -134,7 +141,7 @@ declarations and has no runtime dependencies.
 
 ```bash
 npm install
-npm test              # 1,984 tests
+npm test              # 2,226 tests
 npm run typecheck
 npm run demo          # a worked month, posted and reported
 npm run demo:ingest   # the same month as the bank recorded it
@@ -1484,7 +1491,7 @@ axis the chart exists to show.
 
 ## Releasing
 
-A release is a tag. `v0.1.0` publishes `0.1.0` and nothing else publishes
+A release is a tag. `v0.2.0` publishes `0.2.0` and nothing else publishes
 anything: the workflow refuses a tag that disagrees with `package.json`, runs
 the suite and the type check, then installs the packed tarball into a bare
 project and uses it from there before anything reaches the registry.
@@ -1493,9 +1500,13 @@ The publish job holds one permission, `id-token: write`. There is no npm token
 in this repository, in its secrets, or in any log: npm trusted publishing
 exchanges a short-lived OIDC token for the right to publish this package from
 this repository, and attaches build provenance automatically. That also means
-the trusted publisher has to be registered on npm for the package before the
-first tag is pushed — the registry does not validate the arrangement until a
-publish is attempted.
+the trusted publisher has to be registered on npm for the package before a
+tag is pushed — the registry does not validate the arrangement until a publish
+is attempted.
+
+`0.1.0` is already on the registry, and a published version can never be
+replaced, so the next release bumps `version` in `package.json` first and
+pushes the tag that matches it.
 
 ## Licence
 
